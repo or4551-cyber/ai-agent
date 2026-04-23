@@ -109,7 +109,7 @@ export default function DevicePage() {
   const batteryOffset = circumference - (batteryLevel / 100) * circumference;
 
   return (
-    <div className={`flex flex-col h-full overflow-y-auto pb-24 transition-all duration-700 ${animateIn ? 'opacity-100' : 'opacity-0'}`}>
+    <div className={`flex flex-col h-full overflow-y-auto pb-4 transition-all duration-700 ${animateIn ? 'opacity-100' : 'opacity-0'}`}>
       {/* Header */}
       <div className="glass sticky top-0 z-10 flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">

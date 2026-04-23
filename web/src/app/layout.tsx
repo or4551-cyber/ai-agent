@@ -40,7 +40,7 @@ export default function RootLayout({
       <body className="h-screen flex flex-col md:flex-row overflow-hidden">
         <Providers>
           <Sidebar />
-          <main className="flex-1 flex flex-col min-h-0">{children}</main>
+          <main className="flex-1 flex flex-col min-h-0 pb-14 md:pb-0">{children}</main>
           <BottomNav />
         </Providers>
       </body>
