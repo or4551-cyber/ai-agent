@@ -1,8 +1,9 @@
 'use client';
 
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageCircle, FolderOpen, Image, LayoutDashboard, Smartphone } from 'lucide-react';
+import { MessageCircle, FolderOpen, Image, LayoutDashboard, Smartphone, Menu, X } from 'lucide-react';
 
 const NAV_ITEMS = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'בית' },
@@ -14,29 +15,62 @@ const NAV_ITEMS = [
 
 export default function BottomNav() {
   const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Close on navigation
+  useEffect(() => { setOpen(false); }, [pathname]);
 
   return (
-    <nav className="bottom-nav glass flex items-center justify-around border-t border-[var(--border)] px-1 pt-1.5 pb-3 md:hidden fixed bottom-0 left-0 right-0 z-50" style={{ paddingBottom: 'max(12px, env(safe-area-inset-bottom))' }}>
-      {NAV_ITEMS.map((item) => {
-        const isActive = pathname === item.href;
-        const Icon = item.icon;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-2xl transition-all relative ${
-              isActive
-                ? 'text-[var(--primary)]'
-                : 'text-[var(--muted-foreground)] active:text-[var(--foreground)]'
-            }`}
-          >
-            <div className={`relative p-1 rounded-xl transition-all ${isActive ? 'bg-[var(--primary)]/10' : ''}`}>
-              <Icon size={19} strokeWidth={isActive ? 2.5 : 1.5} />
-            </div>
-            <span className={`text-[9px] leading-tight transition-all ${isActive ? 'font-semibold' : 'font-medium'}`}>{item.label}</span>
-          </Link>
-        );
-      })}
-    </nav>
+    <div ref={menuRef} className="fixed bottom-4 left-4 z-50 md:hidden" style={{ bottom: 'max(16px, env(safe-area-inset-bottom))' }}>
+      {/* Popup menu */}
+      {open && (
+        <div className="absolute bottom-14 left-0 glass border border-[var(--border)] rounded-2xl p-2 min-w-[160px] shadow-2xl shadow-black/40 animate-fade-in">
+          {NAV_ITEMS.map((item) => {
+            const isActive = pathname === item.href;
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${
+                  isActive
+                    ? 'bg-[var(--primary)]/15 text-[var(--primary)]'
+                    : 'text-[var(--foreground)] hover:bg-[var(--muted)]'
+                }`}
+              >
+                <Icon size={18} strokeWidth={isActive ? 2.5 : 1.5} />
+                <span className={`text-sm ${isActive ? 'font-semibold' : 'font-medium'}`}>{item.label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      {/* FAB button */}
+      <button
+        onClick={() => setOpen(!open)}
+        className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 ${
+          open
+            ? 'bg-[var(--muted)] text-[var(--foreground)] rotate-90'
+            : 'bg-gradient-to-br from-[var(--primary)] to-purple-600 text-white shadow-[var(--primary)]/30'
+        }`}
+      >
+        {open ? <X size={20} /> : <Menu size={20} />}
+      </button>
+    </div>
   );
 }
