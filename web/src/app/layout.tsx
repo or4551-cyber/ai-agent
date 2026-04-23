@@ -37,7 +37,7 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
-      <body className="h-screen flex flex-col md:flex-row overflow-hidden">
+      <body className="flex flex-col md:flex-row overflow-hidden" style={{ height: '100dvh' }}>
         <Providers>
           <Sidebar />
           <main className="flex-1 flex flex-col min-h-0">{children}</main>
