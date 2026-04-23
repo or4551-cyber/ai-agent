@@ -551,30 +551,73 @@ export async function whatsappMessages(): Promise<string> {
 
 export async function whatsappReply(contactName: string, message: string): Promise<string> {
   try {
-    const raw = await runCommand('termux-notification-list 2>/dev/null', undefined, 5000);
-    const notifications = JSON.parse(raw);
+    // Step 1: Find the WhatsApp notification
+    const raw = await runCommand('termux-notification-list 2>/dev/null', undefined, 8000);
+    let notifications: any[];
+    try {
+      notifications = JSON.parse(raw);
+    } catch {
+      return '❌ לא הצלחתי לקרוא התראות. ודא שיש ל-Termux:API הרשאת Notification Access.';
+    }
 
-    const waNotif = notifications.find(
+    const waNotifs = notifications.filter(
       (n: any) =>
         (n.packageName === 'com.whatsapp' || n.packageName === 'com.whatsapp.w4b') &&
         n.title && n.title.toLowerCase().includes(contactName.toLowerCase())
     );
 
-    if (!waNotif) {
-      return `לא מצאתי הודעה מ-"${contactName}" בהתראות. ייתכן שההודעה כבר נקראה.`;
+    if (waNotifs.length === 0) {
+      return `❌ לא מצאתי הודעה מ-"${contactName}" בהתראות. ייתכן שההודעה כבר נקראה או שההתראה נמחקה.`;
     }
 
-    // Try notification reply
+    const waNotif = waNotifs[0];
+    const escapedMsg = message.replace(/"/g, '\\"').replace(/\$/g, '\\$');
+
+    // Step 2: Try notification reply (primary method)
     if (waNotif.key) {
+      try {
+        const replyResult = await runCommand(
+          `termux-notification-reply "${waNotif.key}" "${escapedMsg}"`,
+          undefined, 8000
+        );
+
+        // Step 3: Verify — wait and check if the notification changed
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const verifyRaw = await runCommand('termux-notification-list 2>/dev/null', undefined, 8000);
+        try {
+          const verifyNotifs = JSON.parse(verifyRaw);
+          const stillThere = verifyNotifs.find(
+            (n: any) => n.key === waNotif.key &&
+              n.content === waNotif.content
+          );
+          // If the notification content changed or disappeared, reply likely worked
+          if (!stillThere) {
+            return `✅ נשלח ל-${contactName}: "${message}"`;
+          }
+        } catch {}
+
+        // Can't fully verify — be honest
+        if (!replyResult || replyResult.trim() === '') {
+          return `⚠️ ניסיתי לשלוח ל-${contactName}: "${message}"\nלא ניתן לאמת שההודעה נשלחה. בדוק בווטסאפ.`;
+        }
+      } catch (replyErr) {
+        console.error('[WHATSAPP] notification-reply failed:', (replyErr as Error).message);
+      }
+    }
+
+    // Step 4: Fallback — open WhatsApp with message pre-filled
+    // Extract phone number if available from notification
+    try {
+      const encodedMsg = encodeURIComponent(message);
       await runCommand(
-        `termux-notification-reply -k "${waNotif.key}" "${message.replace(/"/g, '\\"')}" 2>/dev/null`,
+        `am start -a android.intent.action.VIEW -d "https://wa.me/?text=${encodedMsg}" com.whatsapp`,
         undefined, 5000
       );
-      return `✅ שלחתי ל-${contactName}: "${message}"`;
-    }
+      return `⚠️ לא הצלחתי לשלוח אוטומטית.\nפתחתי את ווטסאפ עם ההודעה מוכנה — לחץ שלח ל-${contactName}.`;
+    } catch {}
 
-    return 'לא הצלחתי לשלוח תשובה — ההתראה לא תומכת ב-reply.';
+    return `❌ לא הצלחתי לשלוח הודעה ל-${contactName}. נסה לשלוח ידנית דרך ווטסאפ.`;
   } catch (err) {
-    return `שגיאה: ${(err as Error).message}`;
+    return `❌ שגיאה בשליחת הודעה: ${(err as Error).message}`;
   }
 }
