@@ -343,157 +343,131 @@ app.get('/api/device-stats', authQuery, async (_req, res) => {
   res.json(stats);
 });
 
-// Track flashlight state (Termux:API has no query command)
+// Cached device state (avoids slow reads on every action)
 let flashlightOn = false;
+let cachedVolume = 7;
+let cachedBrightness = 128;
+let silentMode = false;
 
-app.post('/api/device-action', authQuery, async (req, res) => {
+// Non-blocking command runner using child_process.exec
+function runAsync(cmd: string): void {
+  const { exec } = require('child_process');
+  exec(cmd, { timeout: 5000 }, (err: any) => {
+    if (err) console.error(`[DEVICE] Async fail: ${cmd}`, err.message);
+  });
+}
+
+function runSync(cmd: string, timeout = 3000): string {
   const { execSync } = require('child_process');
+  try {
+    return execSync(cmd, { timeout }).toString().trim();
+  } catch (e) {
+    console.error(`[DEVICE] Failed: ${cmd}`);
+    return '';
+  }
+}
+
+app.post('/api/device-action', authQuery, (req, res) => {
   const { action } = req.body;
   const results: Record<string, string> = {};
 
-  const run = (cmd: string, timeout = 5000): string => {
-    try {
-      console.log(`[DEVICE] Running: ${cmd}`);
-      const out = execSync(cmd, { timeout }).toString().trim();
-      console.log(`[DEVICE] Output: ${out.substring(0, 200)}`);
-      return out;
-    } catch (e) {
-      console.error(`[DEVICE] Failed: ${cmd}`, (e as Error).message);
-      return '';
+  console.log(`[DEVICE] ${action}`);
+
+  switch (action) {
+    // --- WiFi ---
+    case 'toggle_wifi': {
+      // Respond immediately, toggle in background
+      const raw = runSync('termux-wifi-connectioninfo', 4000);
+      let wifiOn = false;
+      try {
+        const info = JSON.parse(raw);
+        wifiOn = info.supplicant_state === 'COMPLETED';
+      } catch {}
+      runAsync(`termux-wifi-enable ${wifiOn ? 'false' : 'true'}`);
+      results.message = wifiOn ? 'WiFi כבוי' : 'WiFi דולק';
+      break;
     }
-  };
 
-  const toast = (msg: string) => run(`termux-toast "${msg}"`, 3000);
+    // --- Bluetooth ---
+    case 'toggle_bluetooth':
+      runAsync('am start -a android.settings.BLUETOOTH_SETTINGS');
+      results.message = 'הגדרות בלוטות\'';
+      break;
 
-  console.log(`[DEVICE] Action requested: ${action}`);
+    // --- Flashlight ---
+    case 'toggle_flashlight':
+      flashlightOn = !flashlightOn;
+      runAsync(`termux-torch ${flashlightOn ? 'on' : 'off'}`);
+      results.message = flashlightOn ? 'פנס דלוק 🔦' : 'פנס כבוי';
+      break;
 
-  try {
-    switch (action) {
-      // --- WiFi: detect state, then flip ---
-      case 'toggle_wifi': {
-        toast('WiFi...');
-        let wifiOn = false;
-        try {
-          const raw = run('termux-wifi-connectioninfo', 5000);
-          const info = JSON.parse(raw);
-          wifiOn = info.supplicant_state === 'COMPLETED' || (info.ip && info.ip !== '' && info.ip !== '<unknown ssid>');
-        } catch {}
-        run(`termux-wifi-enable ${wifiOn ? 'false' : 'true'}`);
-        results.message = wifiOn ? 'WiFi כבוי' : 'WiFi דולק';
-        toast(results.message);
-        break;
+    // --- Silent/Vibrate mode toggle ---
+    case 'vibrate':
+      silentMode = !silentMode;
+      if (silentMode) {
+        runAsync('termux-volume ring 0');
+        runAsync('termux-volume notification 0');
+        runAsync('termux-vibrate -d 200');
+      } else {
+        runAsync('termux-volume ring 7');
+        runAsync('termux-volume notification 7');
       }
+      results.message = silentMode ? 'מצב שקט 🔇' : 'מצב רגיל 🔔';
+      break;
 
-      // --- Bluetooth: open system dialog ---
-      case 'toggle_bluetooth':
-        run('am start -a android.settings.BLUETOOTH_SETTINGS');
-        results.message = 'הגדרות בלוטות\' נפתחו';
-        break;
+    // --- Volume ---
+    case 'volume_up':
+      cachedVolume = Math.min(cachedVolume + 1, 15);
+      runAsync(`termux-volume music ${cachedVolume}`);
+      results.message = `ווליום: ${cachedVolume}/15`;
+      break;
+    case 'volume_down':
+      cachedVolume = Math.max(cachedVolume - 1, 0);
+      runAsync(`termux-volume music ${cachedVolume}`);
+      results.message = `ווליום: ${cachedVolume}/15`;
+      break;
 
-      // --- Flashlight: on/off toggle ---
-      case 'toggle_flashlight':
-        flashlightOn = !flashlightOn;
-        run(`termux-torch ${flashlightOn ? 'on' : 'off'}`);
-        results.message = flashlightOn ? 'פנס דלוק' : 'פנס כבוי';
-        toast(results.message);
-        break;
+    // --- Brightness ---
+    case 'brightness_up':
+      cachedBrightness = Math.min(cachedBrightness + 30, 255);
+      runAsync(`termux-brightness ${cachedBrightness}`);
+      results.message = `בהירות: ${Math.round(cachedBrightness / 255 * 100)}%`;
+      break;
+    case 'brightness_down':
+      cachedBrightness = Math.max(cachedBrightness - 30, 5);
+      runAsync(`termux-brightness ${cachedBrightness}`);
+      results.message = `בהירות: ${Math.round(cachedBrightness / 255 * 100)}%`;
+      break;
 
-      // --- Vibrate ---
-      case 'vibrate':
-        run('termux-vibrate -d 300');
-        results.message = 'רטט';
-        break;
+    // --- Media ---
+    case 'media_play_pause':
+      runAsync('am broadcast --user 0 -a com.android.music.musicservicecommand --es command togglepause');
+      results.message = 'Play/Pause ▶️';
+      break;
+    case 'media_next':
+      runAsync('am broadcast --user 0 -a com.android.music.musicservicecommand --es command next');
+      results.message = 'שיר הבא ⏭️';
+      break;
+    case 'media_previous':
+      runAsync('am broadcast --user 0 -a com.android.music.musicservicecommand --es command previous');
+      results.message = 'שיר קודם ⏮️';
+      break;
 
-      // --- Volume: read current, adjust, set ---
-      case 'volume_up': {
-        let vol = 7;
-        try {
-          const raw = run('termux-volume', 3000);
-          const volumes = JSON.parse(raw);
-          const music = volumes.find((v: any) => v.stream === 'music');
-          vol = music?.volume ?? 7;
-        } catch {}
-        const newVol = Math.min(vol + 1, 15);
-        run(`termux-volume music ${newVol}`);
-        results.message = `ווליום: ${newVol}/15`;
-        toast(results.message);
-        break;
-      }
-      case 'volume_down': {
-        let vol = 7;
-        try {
-          const raw = run('termux-volume', 3000);
-          const volumes = JSON.parse(raw);
-          const music = volumes.find((v: any) => v.stream === 'music');
-          vol = music?.volume ?? 7;
-        } catch {}
-        const newVol = Math.max(vol - 1, 0);
-        run(`termux-volume music ${newVol}`);
-        results.message = `ווליום: ${newVol}/15`;
-        toast(results.message);
-        break;
-      }
+    // --- Quick actions ---
+    case 'open_dialer':
+      runAsync('am start -a android.intent.action.DIAL');
+      results.message = 'חייגן נפתח';
+      break;
+    case 'screenshot':
+      runAsync('screencap -p /storage/emulated/0/Screenshots/ai-screenshot.png');
+      results.message = 'צילום מסך';
+      break;
+    case 'screenrecord':
+      results.message = 'דורש root';
+      break;
 
-      // --- Brightness: adjust by 30 (range 0-255) ---
-      case 'brightness_up': {
-        let cur = 128;
-        try {
-          const raw = run('settings get system screen_brightness', 2000);
-          cur = parseInt(raw) || 128;
-        } catch {}
-        const newBr = Math.min(cur + 30, 255);
-        run(`termux-brightness ${newBr}`);
-        results.message = `בהירות: ${Math.round(newBr / 255 * 100)}%`;
-        toast(results.message);
-        break;
-      }
-      case 'brightness_down': {
-        let cur = 128;
-        try {
-          const raw = run('settings get system screen_brightness', 2000);
-          cur = parseInt(raw) || 128;
-        } catch {}
-        const newBr = Math.max(cur - 30, 5);
-        run(`termux-brightness ${newBr}`);
-        results.message = `בהירות: ${Math.round(newBr / 255 * 100)}%`;
-        toast(results.message);
-        break;
-      }
-
-      // --- Media: use am broadcast for widest player support ---
-      case 'media_play_pause':
-        run('am broadcast --user 0 -a com.android.music.musicservicecommand --es command togglepause');
-        results.message = 'Play/Pause';
-        break;
-      case 'media_next':
-        run('am broadcast --user 0 -a com.android.music.musicservicecommand --es command next');
-        results.message = 'שיר הבא';
-        break;
-      case 'media_previous':
-        run('am broadcast --user 0 -a com.android.music.musicservicecommand --es command previous');
-        results.message = 'שיר קודם';
-        break;
-
-      // --- Quick actions ---
-      case 'open_dialer':
-        run('am start -a android.intent.action.DIAL');
-        results.message = 'חייגן נפתח';
-        break;
-      case 'screenshot':
-        run('termux-toast "מצלם מסך..."');
-        run('su -c "screencap -p /storage/emulated/0/Screenshots/ai-screenshot-$(date +%s).png" 2>/dev/null || termux-toast "צילום מסך דורש הרשאות root"');
-        results.message = 'צילום מסך';
-        break;
-      case 'screenrecord':
-        run('termux-toast "הקלטה לא זמינה ללא root"');
-        results.message = 'דורש root';
-        break;
-
-      default:
-        results.message = `פעולה לא מוכרת: ${action}`;
-    }
-  } catch (err) {
-    results.message = `שגיאה: ${(err as Error).message}`;
+    default:
+      results.message = `פעולה לא מוכרת: ${action}`;
   }
 
   res.json(results);

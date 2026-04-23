@@ -3,10 +3,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Battery, BatteryCharging, Wifi, WifiOff, Bluetooth, BluetoothOff,
-  Flashlight, Sun, Moon, Volume2, VolumeX,
-  Smartphone, HardDrive, Signal, ThermometerSun,
+  Flashlight, Sun, Volume2, VolumeX, BellOff, Bell,
+  Smartphone, HardDrive,
   Play, Pause, SkipForward, SkipBack, Music,
-  RefreshCw, ChevronLeft, Vibrate, Phone, ScreenShare, Loader2, Check,
+  RefreshCw, ChevronLeft, Phone, ScreenShare,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -43,6 +43,7 @@ export default function DevicePage() {
   const [animateIn, setAnimateIn] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [silentMode, setSilentMode] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -229,11 +230,11 @@ export default function DevicePage() {
               onClick={() => sendAction('toggle_flashlight')}
             />
             <ToggleButton
-              icon={<Vibrate size={20} />}
-              label="רטט"
-              active={false}
+              icon={silentMode ? <BellOff size={20} /> : <Bell size={20} />}
+              label={silentMode ? 'שקט' : 'רגיל'}
+              active={silentMode}
               color="text-purple-400"
-              onClick={() => sendAction('vibrate')}
+              onClick={() => { setSilentMode(!silentMode); sendAction('vibrate'); }}
             />
           </div>
         </div>
