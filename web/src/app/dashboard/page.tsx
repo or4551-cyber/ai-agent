@@ -4,13 +4,13 @@ import { useState, useEffect, useRef } from 'react';
 import {
   getBriefing, getSuggestions, triggerDigest, Suggestion,
   getReminders, completeReminder, addReminder, Reminder,
-  getObserverStatus
+  getObserverStatus, getUserProfile, UserProfile
 } from '@/lib/api';
 import {
   Battery, BatteryCharging, Loader2, MessageSquare,
   Lightbulb, Sparkles, Eye, CheckCircle2, Circle,
   Plus, Bell, Cloud, Cpu, ChevronRight, RefreshCw,
-  Camera, Search, FolderOpen
+  Camera, Search, FolderOpen, Brain, TrendingUp, Zap
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -19,6 +19,7 @@ export default function DashboardPage() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [observerStatus, setObserverStatus] = useState<Record<string, unknown> | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [digestLoading, setDigestLoading] = useState(false);
@@ -29,16 +30,18 @@ export default function DashboardPage() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const [b, r, s, obs] = await Promise.all([
+      const [b, r, s, obs, prof] = await Promise.all([
         getBriefing().catch(() => null),
         getReminders().catch(() => ({ reminders: [] })),
         getSuggestions().catch(() => ({ suggestions: [] })),
         getObserverStatus().catch(() => null),
+        getUserProfile().catch(() => null),
       ]);
       setBriefing(b);
       setReminders(r.reminders);
       setSuggestions(s.suggestions);
       setObserverStatus(obs);
+      setProfile(prof);
     } catch {} finally { setLoading(false); setRefreshing(false); }
   };
 
@@ -257,6 +260,79 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* AI Learning Stats */}
+      {profile && (profile.totalConversations > 0 || profile.topTools.length > 0) && (
+        <div className="px-4 pb-6">
+          <h2 className="text-xs font-semibold text-[var(--muted-foreground)] mb-2 tracking-wider flex items-center gap-1.5">
+            <Brain size={13} /> למידה מצטברת
+          </h2>
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+            {/* Stats row */}
+            <div className="grid grid-cols-3 divide-x divide-[var(--border)] border-b border-[var(--border)]">
+              <div className="p-3 text-center">
+                <div className="text-lg font-bold">{profile.totalConversations}</div>
+                <div className="text-[10px] text-[var(--muted-foreground)]">שיחות</div>
+              </div>
+              <div className="p-3 text-center">
+                <div className="text-lg font-bold">{profile.totalMessages}</div>
+                <div className="text-[10px] text-[var(--muted-foreground)]">הודעות</div>
+              </div>
+              <div className="p-3 text-center">
+                <div className="text-lg font-bold">{profile.topTopics.length}</div>
+                <div className="text-[10px] text-[var(--muted-foreground)]">נושאים</div>
+              </div>
+            </div>
+
+            {/* Top topics */}
+            {profile.topTopics.length > 0 && (
+              <div className="p-3 border-b border-[var(--border)]">
+                <div className="text-[10px] text-[var(--muted-foreground)] mb-1.5 flex items-center gap-1">
+                  <TrendingUp size={10} /> נושאים עיקריים
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {profile.topTopics.slice(0, 6).map((t) => (
+                    <span key={t.topic} className="px-2 py-0.5 rounded-full bg-[var(--primary)]/10 text-[var(--primary)] text-[10px] font-medium">
+                      {t.topic} ({t.count})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Top tools */}
+            {profile.topTools.length > 0 && (
+              <div className="p-3 border-b border-[var(--border)]">
+                <div className="text-[10px] text-[var(--muted-foreground)] mb-1.5 flex items-center gap-1">
+                  <Zap size={10} /> כלים שנמצאים בשימוש
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {profile.topTools.slice(0, 6).map((t) => (
+                    <span key={t.tool} className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 text-[10px] font-medium">
+                      {t.tool} ({t.count})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Learned preferences */}
+            {profile.preferences.length > 0 && (
+              <div className="p-3">
+                <div className="text-[10px] text-[var(--muted-foreground)] mb-1.5">העדפות שנלמדו</div>
+                <div className="space-y-1">
+                  {profile.preferences.slice(0, 4).map((p) => (
+                    <div key={p.key} className="text-[11px] flex items-start gap-1.5">
+                      <span className="text-emerald-400">•</span>
+                      <span><strong>{p.key}:</strong> {p.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

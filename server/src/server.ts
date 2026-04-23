@@ -12,6 +12,7 @@ import { ObserverService } from './observer/service';
 import { ReminderService } from './services/reminders';
 import { RoutineService } from './services/routines';
 import { generateBriefing } from './services/briefing';
+import { UserProfileService } from './services/user-profile';
 
 dotenv.config();
 
@@ -22,6 +23,8 @@ reminderService.start();
 
 const routineService = new RoutineService();
 routineService.start();
+
+const userProfileService = new UserProfileService();
 
 if (process.env.ANTHROPIC_API_KEY) {
   observer = new ObserverService(process.env.ANTHROPIC_API_KEY);
@@ -131,6 +134,32 @@ app.post('/api/observer/digest', authMiddleware, async (_req, res) => {
   }
   const suggestions = await observer.runDigest();
   res.json({ suggestions });
+});
+
+// ===== USER PROFILE API =====
+
+app.get('/api/profile', authMiddleware, (_req, res) => {
+  res.json(userProfileService.getProfile());
+});
+
+app.post('/api/profile/preference', authMiddleware, (req, res) => {
+  const { key, value } = req.body;
+  if (!key || !value) {
+    res.status(400).json({ error: 'key and value required' });
+    return;
+  }
+  userProfileService.setPreference(key, value, 'explicit', 1.0);
+  res.json({ success: true });
+});
+
+app.post('/api/profile/name', authMiddleware, (req, res) => {
+  const { name } = req.body;
+  if (!name) {
+    res.status(400).json({ error: 'name required' });
+    return;
+  }
+  userProfileService.setName(name);
+  res.json({ success: true });
 });
 
 // ===== DASHBOARD API =====

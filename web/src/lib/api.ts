@@ -143,6 +143,35 @@ export async function triggerDigest(): Promise<{ suggestions: Suggestion[] }> {
   return apiFetch('/api/observer/digest', { method: 'POST' });
 }
 
+// ===== USER PROFILE =====
+
+export interface UserProfile {
+  name: string | null;
+  language: string;
+  preferences: { key: string; value: string; confidence: number; source: string }[];
+  activeHours: number[];
+  topTools: { tool: string; count: number }[];
+  topTopics: { topic: string; count: number }[];
+  recentConversations: { id: string; timestamp: string; topics: string[]; sentiment: string }[];
+  style: { verbosity: string; techLevel: string; tone: string };
+  totalConversations: number;
+  totalMessages: number;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export async function getUserProfile(): Promise<UserProfile> {
+  return apiFetch('/api/profile');
+}
+
+export async function setProfileName(name: string): Promise<void> {
+  return apiFetch('/api/profile/name', { method: 'POST', body: JSON.stringify({ name }) });
+}
+
+export async function setProfilePreference(key: string, value: string): Promise<void> {
+  return apiFetch('/api/profile/preference', { method: 'POST', body: JSON.stringify({ key, value }) });
+}
+
 // ===== DASHBOARD =====
 
 export async function getDashboard(): Promise<Record<string, unknown>> {

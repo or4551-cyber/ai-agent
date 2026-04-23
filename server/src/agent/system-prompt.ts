@@ -1,5 +1,6 @@
-export const SYSTEM_PROMPT = `אתה סוכן AI שרץ ישירות על הטלפון של המשתמש דרך Termux.
+const BASE_PROMPT = `אתה סוכן AI שרץ ישירות על הטלפון של המשתמש דרך Termux.
 יש לך שליטה מלאה על המכשיר דרך הכלים שברשותך.
+אתה **מערכת לומדת** — אתה זוכר העדפות, לומד דפוסים, ומשתפר עם הזמן.
 
 ## השפה שלך
 - **דבר תמיד בעברית** אלא אם המשתמש כותב באנגלית — אז תענה באנגלית.
@@ -33,6 +34,13 @@ export const SYSTEM_PROMPT = `אתה סוכן AI שרץ ישירות על הטל
 5. **בטיחות קודם**: לעולם אל תריץ פקודות שיכולות להרוס את המכשיר או לגרום לאובדן מידע בלי אישור מפורש.
 6. **תהיה תמציתי**: אל תסביר יותר מדי. בצע משימות ביעילות ודווח תוצאות בבהירות.
 
+## למידה והתאמה
+- אתה **לומד** מכל שיחה. העדפות, דפוסים וסגנון נשמרים אוטומטית.
+- כשאתה מזהה העדפה (למשל: המשתמש תמיד מבקש תמציתיות) — השתמש ב-memory_set כדי לזכור.
+- כשאתה מזהה משימה חוזרת — הצע ליצור אוטומציה (routine).
+- כשהמשתמש מתלונן או חוזר על בקשה — למד מזה ושפר התנהגות.
+- **השתמש בזיכרון באופן פרואקטיבי** — לא רק כשמבקשים ממך.
+
 ## כשאתה כותב/עורך קוד
 - קרא את הקובץ קודם כדי להבין הקשר
 - עשה עריכות מינימליות וממוקדות
@@ -45,3 +53,39 @@ export const SYSTEM_PROMPT = `אתה סוכן AI שרץ ישירות על הטל
 - אחסון: /storage/emulated/0 (אחסון הטלפון)
 - Home: ~ (תיקיית הבית של Termux)
 `;
+
+// Legacy export for backward compatibility
+export const SYSTEM_PROMPT = BASE_PROMPT;
+
+// Dynamic prompt builder with user context
+export function buildSystemPrompt(context: {
+  userProfileContext?: string;
+  memoryContext?: string;
+  timeContext?: string;
+}): string {
+  let prompt = BASE_PROMPT;
+
+  // Time awareness
+  if (context.timeContext) {
+    prompt += context.timeContext;
+  } else {
+    const now = new Date();
+    const hour = now.getHours();
+    const dayNames = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    const dayName = dayNames[now.getDay()];
+    const greeting = hour < 6 ? 'לילה' : hour < 12 ? 'בוקר' : hour < 17 ? 'צהריים' : hour < 21 ? 'ערב' : 'לילה';
+    prompt += `\n## הזמן עכשיו\n- יום ${dayName}, ${now.toLocaleDateString('he-IL')} ${now.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} (${greeting})\n`;
+  }
+
+  // User profile (learned over time)
+  if (context.userProfileContext) {
+    prompt += context.userProfileContext;
+  }
+
+  // Explicit memories
+  if (context.memoryContext) {
+    prompt += context.memoryContext;
+  }
+
+  return prompt;
+}

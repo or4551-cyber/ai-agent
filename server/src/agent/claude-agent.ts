@@ -1,9 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getToolDefinitions, getDangerLevel } from '../tools/definitions';
 import { executeTool } from './tool-executor';
-import { SYSTEM_PROMPT } from './system-prompt';
+import { buildSystemPrompt } from './system-prompt';
 import { WSResponse } from '../types';
 import { AgentMemory } from './memory';
+import { UserProfileService } from '../services/user-profile';
+import { ConversationLearner } from '../services/conversation-learner';
 
 interface MessageParam {
   role: 'user' | 'assistant';
@@ -22,6 +24,10 @@ export class ClaudeAgent {
   private onEvent: (event: WSResponse) => void;
   private pendingApprovals: Map<string, (approved: boolean) => void> = new Map();
   private memory: AgentMemory;
+  private userProfile: UserProfileService;
+  private learner: ConversationLearner | null;
+  private toolsUsedThisSession: string[] = [];
+  private conversationId: string;
   private usage = { inputTokens: 0, outputTokens: 0, totalCost: 0 };
 
   // Pricing per million tokens (Sonnet 4)
@@ -40,6 +46,12 @@ export class ClaudeAgent {
     this.model = model;
     this.onEvent = onEvent;
     this.memory = new AgentMemory();
+    this.userProfile = new UserProfileService();
+    this.conversationId = `conv-${Date.now()}`;
+    this.learner = new ConversationLearner(apiKey, this.userProfile);
+    
+    // Record that user is active
+    this.userProfile.recordActivity();
   }
 
   async processMessage(
@@ -78,7 +90,10 @@ export class ClaudeAgent {
       const response = await this.client.messages.create({
         model: this.model,
         max_tokens: 8192,
-        system: SYSTEM_PROMPT + this.memory.toContextString(),
+        system: buildSystemPrompt({
+          userProfileContext: this.userProfile.toContextString(),
+          memoryContext: this.memory.toContextString(),
+        }),
         tools: getToolDefinitions() as Anthropic.Tool[],
         messages: this.conversationHistory as Anthropic.MessageParam[],
       });
@@ -126,6 +141,9 @@ export class ClaudeAgent {
             name: block.name,
             input: block.input,
           });
+
+          // Track tool usage for learning
+          this.toolsUsedThisSession.push(block.name);
 
           this.onEvent({
             type: 'tool_call_start',
@@ -191,12 +209,36 @@ export class ClaudeAgent {
       }
     }
 
+    // Track message count
+    this.userProfile.recordMessage();
+
+    // Background: learn from this conversation (non-blocking)
+    this.learnInBackground();
+
     this.onEvent({
       type: 'message_done',
       payload: { text: finalText },
     });
 
     return finalText;
+  }
+
+  private learnInBackground(): void {
+    if (!this.learner) return;
+    // Only learn after enough messages (at least 2 user+assistant pairs)
+    const userMessages = this.conversationHistory.filter(m => m.role === 'user').length;
+    if (userMessages < 2) return;
+
+    const simplified = this.conversationHistory
+      .filter(m => typeof m.content === 'string')
+      .map(m => ({ role: m.role, content: m.content as string }));
+
+    // Fire and forget — don't block the response
+    this.learner.learnFromConversation(
+      this.conversationId,
+      simplified,
+      [...new Set(this.toolsUsedThisSession)]
+    ).catch(() => {});
   }
 
   private requestApproval(
