@@ -172,6 +172,45 @@ export async function setProfilePreference(key: string, value: string): Promise<
   return apiFetch('/api/profile/preference', { method: 'POST', body: JSON.stringify({ key, value }) });
 }
 
+// ===== CONVERSATION HISTORY =====
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  preview: string;
+  messageCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FullConversation {
+  id: string;
+  title: string;
+  messages: { id: string; role: 'user' | 'assistant'; content: string; timestamp: number; toolCalls?: any[] }[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function getConversations(limit = 20, offset = 0): Promise<{ conversations: ConversationSummary[]; total: number }> {
+  return apiFetch(`/api/conversations?limit=${limit}&offset=${offset}`);
+}
+
+export async function getConversation(id: string): Promise<FullConversation> {
+  return apiFetch(`/api/conversations/${id}`);
+}
+
+export async function saveConversation(conversation: FullConversation): Promise<void> {
+  return apiFetch('/api/conversations', { method: 'POST', body: JSON.stringify(conversation) });
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  return apiFetch(`/api/conversations/${id}`, { method: 'DELETE' });
+}
+
+export async function deleteAllConversations(): Promise<void> {
+  return apiFetch('/api/conversations', { method: 'DELETE' });
+}
+
 // ===== SMART ALERTS =====
 
 export interface SmartAlert {

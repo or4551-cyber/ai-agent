@@ -11,7 +11,7 @@ import {
   Battery, BatteryCharging, Loader2, MessageSquare,
   Lightbulb, Sparkles, Eye, CheckCircle2, Circle,
   Plus, Bell, Cloud, Cpu, ChevronRight, RefreshCw,
-  Camera, Search, FolderOpen, Brain, TrendingUp, Zap, AlertCircle, HardDrive
+  Camera, Search, FolderOpen, Brain, TrendingUp, Zap, AlertCircle, HardDrive, Settings
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -115,6 +115,9 @@ export default function DashboardPage() {
           >
             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
           </button>
+          <Link href="/settings" className="p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]">
+            <Settings size={16} />
+          </Link>
         </div>
 
         {/* Alerts dropdown */}

@@ -15,6 +15,7 @@ import { generateBriefing } from './services/briefing';
 import { UserProfileService } from './services/user-profile';
 import { StorageScanner } from './services/storage-scanner';
 import { SmartAlertsService } from './services/smart-alerts';
+import { ConversationHistoryService } from './services/conversation-history';
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ const userProfileService = new UserProfileService();
 const storageScanner = new StorageScanner();
 const smartAlerts = new SmartAlertsService();
 smartAlerts.start();
+const conversationHistory = new ConversationHistoryService();
 
 if (process.env.ANTHROPIC_API_KEY) {
   observer = new ObserverService(process.env.ANTHROPIC_API_KEY);
@@ -228,6 +230,35 @@ app.post('/api/alerts/read/:id', authMiddleware, (req, res) => {
 
 app.post('/api/alerts/read-all', authMiddleware, (_req, res) => {
   smartAlerts.markAllRead();
+  res.json({ success: true });
+});
+
+// ===== CONVERSATION HISTORY API =====
+
+app.get('/api/conversations', authMiddleware, (req, res) => {
+  const limit = parseInt(req.query.limit as string) || 20;
+  const offset = parseInt(req.query.offset as string) || 0;
+  res.json(conversationHistory.list(limit, offset));
+});
+
+app.get('/api/conversations/:id', authMiddleware, (req, res) => {
+  const conv = conversationHistory.get(req.params.id as string);
+  if (!conv) { res.status(404).json({ error: 'Not found' }); return; }
+  res.json(conv);
+});
+
+app.post('/api/conversations', authMiddleware, (req, res) => {
+  conversationHistory.save(req.body);
+  res.json({ success: true });
+});
+
+app.delete('/api/conversations/:id', authMiddleware, (req, res) => {
+  const ok = conversationHistory.delete(req.params.id as string);
+  res.json({ success: ok });
+});
+
+app.delete('/api/conversations', authMiddleware, (_req, res) => {
+  conversationHistory.deleteAll();
   res.json({ success: true });
 });
 

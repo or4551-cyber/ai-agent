@@ -1,3 +1,9 @@
+import {
+  saveConversation as saveToServer,
+  deleteConversation as deleteFromServer,
+  getConversations as getFromServer,
+} from './api';
+
 const STORAGE_KEY = 'ai-agent-conversations';
 const MAX_CONVERSATIONS = 50;
 
@@ -60,11 +66,27 @@ export function saveConversation(convo: Conversation): void {
     convos.unshift(convo);
   }
   saveConversations(convos);
+
+  // Also persist to server (fire-and-forget)
+  saveToServer({
+    id: convo.id,
+    title: convo.title,
+    messages: convo.messages.map(m => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      timestamp: Date.now(),
+      toolCalls: m.toolCalls as any,
+    })),
+    createdAt: new Date(convo.createdAt).getTime(),
+    updatedAt: Date.now(),
+  }).catch(() => {});
 }
 
 export function deleteConversation(id: string): void {
   const convos = getConversations().filter((c) => c.id !== id);
   saveConversations(convos);
+  deleteFromServer(id).catch(() => {});
 }
 
 export function generateTitle(messages: StoredMessage[]): string {
@@ -72,4 +94,22 @@ export function generateTitle(messages: StoredMessage[]): string {
   if (!first) return 'New Chat';
   const text = first.content.slice(0, 50);
   return text.length < first.content.length ? text + '...' : text;
+}
+
+// Sync: load from server if localStorage is empty
+export async function syncFromServer(): Promise<Conversation[]> {
+  try {
+    const local = getConversations();
+    if (local.length > 0) return local;
+    const remote = await getFromServer();
+    if (remote.conversations.length > 0) {
+      // Import from server
+      for (const c of remote.conversations) {
+        // These are summaries, skip full import for now
+      }
+    }
+    return local;
+  } catch {
+    return getConversations();
+  }
 }

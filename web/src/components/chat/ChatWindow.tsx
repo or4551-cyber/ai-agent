@@ -375,11 +375,13 @@ export default function ChatWindow() {
             <div className="grid grid-cols-2 gap-2.5 w-full max-w-xs">
               {[
                 { icon: '🔋', label: 'סוללה', msg: 'כמה סוללה נשארה?' },
-                { icon: '📍', label: 'מיקום', msg: 'איפה אני נמצא?' },
+                { icon: '�️', label: 'סרוק אחסון', msg: 'תסרוק את האחסון ותגיד לי מה אפשר למחוק' },
                 { icon: '📁', label: 'קבצים', msg: 'תראה לי את הקבצים בתיקייה הנוכחית' },
-                { icon: '🔔', label: 'התראות', msg: 'מה ההתראות האחרונות?' },
+                { icon: '🧹', label: 'נקה cache', msg: 'תנקה את כל ה-cache במכשיר' },
                 { icon: '🌤️', label: 'מזג אוויר', msg: 'מה מזג האוויר היום?' },
                 { icon: '📸', label: 'צלם תמונה', msg: 'תצלם תמונה' },
+                { icon: '📍', label: 'מיקום', msg: 'איפה אני נמצא?' },
+                { icon: '🔔', label: 'התראות', msg: 'מה ההתראות האחרונות?' },
               ].map((shortcut, i) => (
                 <button
                   key={shortcut.label}
