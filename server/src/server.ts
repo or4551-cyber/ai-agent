@@ -186,7 +186,7 @@ app.get('/api/dashboard', authMiddleware, async (_req, res) => {
 
 app.get('/api/files', authMiddleware, async (req, res) => {
   try {
-    const dirPath = (req.query.path as string) || process.env.HOME || '.';
+    const dirPath = (req.query.path as string) || '/storage/emulated/0';
     const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
     const items = await Promise.all(
       entries
@@ -310,7 +310,12 @@ app.get('/api/gallery', authMiddleware, async (req, res) => {
   }
 });
 
-app.get('/api/gallery/image', authMiddleware, async (req, res) => {
+app.get('/api/gallery/image', (req, res, next) => {
+  // Allow auth via query param for img tags
+  const token = req.query.token as string;
+  if (token === AUTH_TOKEN) return next();
+  return authMiddleware(req, res, next);
+}, async (req, res) => {
   try {
     const filePath = req.query.path as string;
     if (!filePath) { res.status(400).json({ error: 'path required' }); return; }
