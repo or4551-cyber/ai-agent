@@ -352,22 +352,35 @@ app.post('/api/device-action', authQuery, async (req, res) => {
   const results: Record<string, string> = {};
 
   const run = (cmd: string, timeout = 5000): string => {
-    try { return execSync(cmd, { timeout }).toString().trim(); }
-    catch { return ''; }
+    try {
+      console.log(`[DEVICE] Running: ${cmd}`);
+      const out = execSync(cmd, { timeout }).toString().trim();
+      console.log(`[DEVICE] Output: ${out.substring(0, 200)}`);
+      return out;
+    } catch (e) {
+      console.error(`[DEVICE] Failed: ${cmd}`, (e as Error).message);
+      return '';
+    }
   };
+
+  const toast = (msg: string) => run(`termux-toast "${msg}"`, 3000);
+
+  console.log(`[DEVICE] Action requested: ${action}`);
 
   try {
     switch (action) {
       // --- WiFi: detect state, then flip ---
       case 'toggle_wifi': {
+        toast('WiFi...');
         let wifiOn = false;
         try {
           const raw = run('termux-wifi-connectioninfo', 5000);
           const info = JSON.parse(raw);
-          wifiOn = info.supplicant_state === 'COMPLETED' || (info.ip && info.ip !== '<unknown ssid>');
+          wifiOn = info.supplicant_state === 'COMPLETED' || (info.ip && info.ip !== '' && info.ip !== '<unknown ssid>');
         } catch {}
         run(`termux-wifi-enable ${wifiOn ? 'false' : 'true'}`);
         results.message = wifiOn ? 'WiFi כבוי' : 'WiFi דולק';
+        toast(results.message);
         break;
       }
 
@@ -382,6 +395,7 @@ app.post('/api/device-action', authQuery, async (req, res) => {
         flashlightOn = !flashlightOn;
         run(`termux-torch ${flashlightOn ? 'on' : 'off'}`);
         results.message = flashlightOn ? 'פנס דלוק' : 'פנס כבוי';
+        toast(results.message);
         break;
 
       // --- Vibrate ---
@@ -402,6 +416,7 @@ app.post('/api/device-action', authQuery, async (req, res) => {
         const newVol = Math.min(vol + 1, 15);
         run(`termux-volume music ${newVol}`);
         results.message = `ווליום: ${newVol}/15`;
+        toast(results.message);
         break;
       }
       case 'volume_down': {
@@ -415,6 +430,7 @@ app.post('/api/device-action', authQuery, async (req, res) => {
         const newVol = Math.max(vol - 1, 0);
         run(`termux-volume music ${newVol}`);
         results.message = `ווליום: ${newVol}/15`;
+        toast(results.message);
         break;
       }
 
@@ -428,6 +444,7 @@ app.post('/api/device-action', authQuery, async (req, res) => {
         const newBr = Math.min(cur + 30, 255);
         run(`termux-brightness ${newBr}`);
         results.message = `בהירות: ${Math.round(newBr / 255 * 100)}%`;
+        toast(results.message);
         break;
       }
       case 'brightness_down': {
@@ -439,6 +456,7 @@ app.post('/api/device-action', authQuery, async (req, res) => {
         const newBr = Math.max(cur - 30, 5);
         run(`termux-brightness ${newBr}`);
         results.message = `בהירות: ${Math.round(newBr / 255 * 100)}%`;
+        toast(results.message);
         break;
       }
 
