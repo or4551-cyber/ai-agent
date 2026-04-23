@@ -12,6 +12,8 @@ import { ReminderService } from '../services/reminders';
 import { RoutineService } from '../services/routines';
 import { StorageScanner } from '../services/storage-scanner';
 import { speechToText, textToSpeech } from '../tools/voice';
+import { getGoogleStatus } from '../tools/google-auth';
+import * as googleServices from '../tools/google-services';
 
 const memory = new AgentMemory();
 const reminderService = new ReminderService();
@@ -267,6 +269,66 @@ async function executeToolInternal(
       return termuxApi.whatsappMessages();
     case 'whatsapp_reply':
       return termuxApi.whatsappReply(input.contact_name as string, input.message as string);
+
+    // ===== GOOGLE SERVICES =====
+    case 'google_status': {
+      const status = getGoogleStatus();
+      if (!status.configured) return '❌ Google לא מוגדר. הוסף GOOGLE_CLIENT_ID ו-GOOGLE_CLIENT_SECRET ל-.env';
+      if (!status.authenticated) return `🔗 Google לא מחובר. היכנס לכתובת הבאה בדפדפן:\n${status.authUrl}`;
+      return '✅ Google מחובר ופעיל!';
+    }
+    // Gmail
+    case 'gmail_list':
+      return googleServices.gmailListMessages(input.query as string | undefined, (input.max_results as number) || 10);
+    case 'gmail_read':
+      return googleServices.gmailReadMessage(input.message_id as string);
+    case 'gmail_send':
+      return googleServices.gmailSend(input.to as string, input.subject as string, input.body as string);
+    case 'gmail_search':
+      return googleServices.gmailSearch(input.query as string);
+    case 'gmail_mark_read':
+      return googleServices.gmailMarkRead(input.message_id as string);
+    // Drive
+    case 'drive_list':
+      return googleServices.driveListFiles(input.query as string | undefined, (input.max_results as number) || 15);
+    case 'drive_search':
+      return googleServices.driveSearch(input.query as string);
+    case 'drive_get':
+      return googleServices.driveGetFile(input.file_id as string);
+    case 'drive_create': {
+      const typeMap: Record<string, string> = {
+        doc: 'application/vnd.google-apps.document',
+        sheet: 'application/vnd.google-apps.spreadsheet',
+        text: 'text/plain',
+      };
+      return googleServices.driveCreateFile(
+        input.name as string,
+        input.content as string,
+        typeMap[(input.type as string) || 'text'],
+        input.folder_id as string | undefined
+      );
+    }
+    case 'drive_share':
+      return googleServices.driveShareFile(input.file_id as string, input.email as string, (input.role as string) || 'reader');
+    // Tasks
+    case 'google_tasks_list':
+      return googleServices.tasksListAll((input.max_results as number) || 20);
+    case 'google_tasks_add':
+      return googleServices.tasksAdd(input.title as string, input.notes as string | undefined, input.due_date as string | undefined, input.tasklist_id as string | undefined);
+    case 'google_tasks_complete':
+      return googleServices.tasksComplete(input.task_id as string, input.tasklist_id as string | undefined);
+    case 'google_tasks_delete':
+      return googleServices.tasksDelete(input.task_id as string, input.tasklist_id as string | undefined);
+    // Calendar (Google API)
+    case 'gcal_list':
+      return googleServices.gcalListEvents((input.days as number) || 3, (input.max_results as number) || 15);
+    case 'gcal_add':
+      return googleServices.gcalAddEvent(input.title as string, input.start_time as string, input.end_time as string | undefined, input.location as string | undefined, input.description as string | undefined);
+    case 'gcal_delete':
+      return googleServices.gcalDeleteEvent(input.event_id as string);
+    // Contacts
+    case 'google_contacts':
+      return googleServices.contactsList(input.query as string | undefined, (input.max_results as number) || 20);
 
     default:
       return `Unknown tool: ${toolName}`;

@@ -16,6 +16,7 @@ import { UserProfileService } from './services/user-profile';
 import { StorageScanner } from './services/storage-scanner';
 import { SmartAlertsService } from './services/smart-alerts';
 import { ConversationHistoryService } from './services/conversation-history';
+import { getAuthUrl, handleCallback, getGoogleStatus } from './tools/google-auth';
 
 dotenv.config();
 
@@ -65,6 +66,35 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/tools', authMiddleware, (_req, res) => {
   const { getToolDefinitions } = require('./tools/definitions');
   res.json({ tools: getToolDefinitions() });
+});
+
+// ===== GOOGLE OAUTH =====
+
+app.get('/api/google/auth', (_req, res) => {
+  const url = getAuthUrl();
+  if (!url) {
+    res.status(500).json({ error: 'Google not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env' });
+    return;
+  }
+  res.redirect(url);
+});
+
+app.get('/api/google/callback', async (req, res) => {
+  const code = req.query.code as string;
+  if (!code) {
+    res.status(400).send('Missing code parameter');
+    return;
+  }
+  const success = await handleCallback(code);
+  if (success) {
+    res.send(`<html dir="rtl"><body style="background:#09090b;color:#fafafa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column"><h1>✅ Google מחובר בהצלחה!</h1><p>אפשר לסגור את החלון הזה. הסוכן מחובר עכשיו ל-Gmail, Drive, Tasks, Calendar ו-Contacts.</p></body></html>`);
+  } else {
+    res.status(500).send(`<html dir="rtl"><body style="background:#09090b;color:#fafafa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><h1>❌ שגיאה בחיבור Google</h1></body></html>`);
+  }
+});
+
+app.get('/api/google/status', authMiddleware, (_req, res) => {
+  res.json(getGoogleStatus());
 });
 
 // ===== BRIEFING API =====

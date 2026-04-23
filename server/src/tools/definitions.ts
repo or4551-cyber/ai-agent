@@ -755,6 +755,287 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== GOOGLE SERVICES =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'google_status',
+      description: 'Check if Google account is connected. Returns auth status and login URL if needed.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  // --- Gmail ---
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'gmail_list',
+      description: 'List recent Gmail messages. Optionally filter with a Gmail search query (e.g. "is:unread", "from:john", "subject:invoice").',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Gmail search query (e.g. "is:unread", "from:boss", "subject:meeting"). Default: inbox' },
+          max_results: { type: 'number', description: 'Max messages to return (default 10)' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'gmail_read',
+      description: 'Read the full content of a specific Gmail message by its ID.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'dangerous',
+    definition: {
+      name: 'gmail_send',
+      description: 'Send an email via Gmail. Requires user approval.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Recipient email address' },
+          subject: { type: 'string', description: 'Email subject' },
+          body: { type: 'string', description: 'Email body text' },
+        },
+        required: ['to', 'subject', 'body'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'gmail_search',
+      description: 'Search Gmail with advanced query. Same as gmail_list but semantic alias.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Gmail search query' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'gmail_mark_read',
+      description: 'Mark a Gmail message as read.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          message_id: { type: 'string', description: 'Gmail message ID to mark as read' },
+        },
+        required: ['message_id'],
+      },
+    },
+  },
+  // --- Google Drive ---
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'drive_list',
+      description: 'List recent files in Google Drive. Optionally filter by name.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search by file name' },
+          max_results: { type: 'number', description: 'Max files (default 15)' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'drive_search',
+      description: 'Search Google Drive files by name.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search term' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'drive_get',
+      description: 'Get details and content of a specific Google Drive file by ID. Works with Docs and Sheets.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          file_id: { type: 'string', description: 'Google Drive file ID' },
+        },
+        required: ['file_id'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'drive_create',
+      description: 'Create a new file in Google Drive. Can create Google Docs, Sheets, or plain text files.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'File name' },
+          content: { type: 'string', description: 'File content (text for docs, CSV for sheets)' },
+          type: { type: 'string', description: 'File type: "doc", "sheet", or "text" (default)', enum: ['doc', 'sheet', 'text'] },
+          folder_id: { type: 'string', description: 'Optional folder ID to place the file in' },
+        },
+        required: ['name', 'content'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'drive_share',
+      description: 'Share a Google Drive file with someone via email.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          file_id: { type: 'string', description: 'File ID to share' },
+          email: { type: 'string', description: 'Email address to share with' },
+          role: { type: 'string', description: 'Permission role: reader, writer, commenter', enum: ['reader', 'writer', 'commenter'] },
+        },
+        required: ['file_id', 'email'],
+      },
+    },
+  },
+  // --- Google Tasks ---
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'google_tasks_list',
+      description: 'List all Google Tasks (across all task lists).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          max_results: { type: 'number', description: 'Max tasks per list (default 20)' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'google_tasks_add',
+      description: 'Add a new task to Google Tasks.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Task title' },
+          notes: { type: 'string', description: 'Task notes/details' },
+          due_date: { type: 'string', description: 'Due date in ISO format (e.g. 2025-01-20)' },
+          tasklist_id: { type: 'string', description: 'Task list ID (optional, uses default)' },
+        },
+        required: ['title'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'google_tasks_complete',
+      description: 'Mark a Google Task as completed.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'Task ID' },
+          tasklist_id: { type: 'string', description: 'Task list ID (optional)' },
+        },
+        required: ['task_id'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'google_tasks_delete',
+      description: 'Delete a Google Task.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'string', description: 'Task ID' },
+          tasklist_id: { type: 'string', description: 'Task list ID (optional)' },
+        },
+        required: ['task_id'],
+      },
+    },
+  },
+  // --- Google Calendar (API) ---
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'gcal_list',
+      description: 'List upcoming Google Calendar events. More reliable than calendar_list (uses Google API directly).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          days: { type: 'number', description: 'Number of days ahead (default 3)' },
+          max_results: { type: 'number', description: 'Max events (default 15)' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'gcal_add',
+      description: 'Add an event to Google Calendar.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Event title' },
+          start_time: { type: 'string', description: 'Start time ISO (e.g. 2025-01-15T10:00:00)' },
+          end_time: { type: 'string', description: 'End time ISO (optional, default +1h)' },
+          location: { type: 'string', description: 'Event location' },
+          description: { type: 'string', description: 'Event description' },
+        },
+        required: ['title', 'start_time'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'gcal_delete',
+      description: 'Delete a Google Calendar event by ID.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          event_id: { type: 'string', description: 'Calendar event ID' },
+        },
+        required: ['event_id'],
+      },
+    },
+  },
+  // --- Google Contacts ---
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'google_contacts',
+      description: 'List or search Google Contacts. Returns names, emails, and phone numbers.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search contacts by name (optional — lists recent if empty)' },
+          max_results: { type: 'number', description: 'Max contacts (default 20)' },
+        },
+      },
+    },
+  },
 ];
 
 export function getToolDefinitions(): ToolDefinition[] {
