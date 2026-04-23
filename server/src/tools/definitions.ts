@@ -603,6 +603,92 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== APP LAUNCHER =====
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'open_app',
+      description: 'Open an app on the phone. Supports Hebrew and English names: WhatsApp, ווטסאפ, Spotify, Chrome, Settings, etc. Can also accept package names.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          app_name: { type: 'string', description: 'App name (Hebrew/English) or package name' },
+        },
+        required: ['app_name'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'list_apps',
+      description: 'List installed apps on the phone. Optionally filter by name.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          filter: { type: 'string', description: 'Optional filter to search by name' },
+        },
+      },
+    },
+  },
+  // ===== CALENDAR =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'calendar_list',
+      description: 'List upcoming calendar events. Returns events for the specified number of days ahead.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          days: { type: 'number', description: 'Number of days to look ahead (default: 1)' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'calendar_add',
+      description: 'Add a new event to the phone calendar.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Event title' },
+          start_time: { type: 'string', description: 'Start time in ISO format (e.g. 2025-01-15T10:00:00)' },
+          end_time: { type: 'string', description: 'End time in ISO format (optional, defaults to 1 hour after start)' },
+          location: { type: 'string', description: 'Event location (optional)' },
+        },
+        required: ['title', 'start_time'],
+      },
+    },
+  },
+  // ===== WHATSAPP =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'whatsapp_messages',
+      description: 'Read recent WhatsApp messages from device notifications. Shows sender name and message content.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
+  {
+    dangerLevel: 'dangerous',
+    definition: {
+      name: 'whatsapp_reply',
+      description: 'Reply to a WhatsApp message. Finds the notification from the contact and sends a reply. Requires user approval.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          contact_name: { type: 'string', description: 'Name of the contact to reply to' },
+          message: { type: 'string', description: 'Message to send' },
+        },
+        required: ['contact_name', 'message'],
+      },
+    },
+  },
 ];
 
 export function getToolDefinitions(): ToolDefinition[] {

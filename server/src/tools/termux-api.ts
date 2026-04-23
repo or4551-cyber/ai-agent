@@ -180,3 +180,212 @@ export async function getNotifications(): Promise<string> {
     return raw;
   }
 }
+
+// ===== APP LAUNCHER =====
+
+const APP_ALIASES: Record<string, string> = {
+  'whatsapp': 'com.whatsapp/.Main',
+  'ווטסאפ': 'com.whatsapp/.Main',
+  'chrome': 'com.android.chrome/com.google.android.apps.chrome.Main',
+  'כרום': 'com.android.chrome/com.google.android.apps.chrome.Main',
+  'youtube': 'com.google.android.youtube/.HomeActivity',
+  'יוטיוב': 'com.google.android.youtube/.HomeActivity',
+  'spotify': 'com.spotify.music/.MainActivity',
+  'ספוטיפיי': 'com.spotify.music/.MainActivity',
+  'telegram': 'org.telegram.messenger/.DefaultIcon',
+  'טלגרם': 'org.telegram.messenger/.DefaultIcon',
+  'instagram': 'com.instagram.android/.activity.MainTabActivity',
+  'אינסטגרם': 'com.instagram.android/.activity.MainTabActivity',
+  'camera': 'com.android.camera/.CameraActivity',
+  'מצלמה': 'com.android.camera/.CameraActivity',
+  'settings': 'com.android.settings/.Settings',
+  'הגדרות': 'com.android.settings/.Settings',
+  'maps': 'com.google.android.apps.maps/com.google.android.maps.MapsActivity',
+  'מפות': 'com.google.android.apps.maps/com.google.android.maps.MapsActivity',
+  'gmail': 'com.google.android.gm/.ConversationListActivityGmail',
+  'ג\'ימייל': 'com.google.android.gm/.ConversationListActivityGmail',
+  'phone': 'com.android.dialer/.DialtactsActivity',
+  'טלפון': 'com.android.dialer/.DialtactsActivity',
+  'calculator': 'com.android.calculator2/.Calculator',
+  'מחשבון': 'com.android.calculator2/.Calculator',
+  'clock': 'com.android.deskclock/.DeskClock',
+  'שעון': 'com.android.deskclock/.DeskClock',
+  'files': 'com.google.android.documentsui/.files.FilesActivity',
+  'קבצים': 'com.google.android.documentsui/.files.FilesActivity',
+  'gallery': 'com.google.android.apps.photos/.home.HomeActivity',
+  'גלריה': 'com.google.android.apps.photos/.home.HomeActivity',
+  'tiktok': 'com.zhiliaoapp.musically/.activity.MainActivityLaunch',
+  'טיקטוק': 'com.zhiliaoapp.musically/.activity.MainActivityLaunch',
+  'waze': 'com.waze/.FreeMapAppActivity',
+  'וויז': 'com.waze/.FreeMapAppActivity',
+};
+
+export async function openApp(appName: string): Promise<string> {
+  const key = appName.toLowerCase().trim();
+
+  // Try alias first
+  const alias = APP_ALIASES[key];
+  if (alias) {
+    try {
+      await runCommand(`am start -n ${alias} 2>/dev/null`, undefined, 5000);
+      return `פתחתי את ${appName}`;
+    } catch {}
+  }
+
+  // Try as package name
+  if (key.includes('.')) {
+    try {
+      await runCommand(`monkey -p ${key} -c android.intent.category.LAUNCHER 1 2>/dev/null`, undefined, 5000);
+      return `פתחתי את ${key}`;
+    } catch {}
+  }
+
+  // Search installed packages
+  try {
+    const raw = await runCommand(`pm list packages 2>/dev/null | grep -i "${key}" | head -5`, undefined, 5000);
+    if (raw.trim()) {
+      const firstPkg = raw.split('\n')[0].replace('package:', '').trim();
+      await runCommand(`monkey -p ${firstPkg} -c android.intent.category.LAUNCHER 1 2>/dev/null`, undefined, 5000);
+      return `פתחתי את ${firstPkg}`;
+    }
+  } catch {}
+
+  return `לא מצאתי אפליקציה בשם "${appName}". נסה שם חבילה מדויק (למשל com.whatsapp).`;
+}
+
+export async function listApps(filter?: string): Promise<string> {
+  try {
+    const cmd = filter
+      ? `pm list packages 2>/dev/null | grep -i "${filter}"`
+      : 'pm list packages -3 2>/dev/null | head -40';
+    const raw = await runCommand(cmd, undefined, 10000);
+    const packages = raw.split('\n')
+      .filter(Boolean)
+      .map(line => line.replace('package:', '').trim());
+
+    if (packages.length === 0) return filter ? `לא נמצאו אפליקציות עם "${filter}"` : 'לא נמצאו אפליקציות';
+    return `אפליקציות מותקנות (${packages.length}):\n${packages.join('\n')}`;
+  } catch (err) {
+    return `שגיאה: ${(err as Error).message}`;
+  }
+}
+
+// ===== CALENDAR =====
+
+export async function calendarList(days = 1): Promise<string> {
+  // Try termux-calendar-list first, fallback to content provider
+  try {
+    const raw = await runCommand('termux-calendar-list 2>/dev/null', undefined, 5000);
+    const events = JSON.parse(raw);
+    if (events.length === 0) return 'אין אירועים בלוח השנה.';
+
+    const now = new Date();
+    const endDate = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+
+    const filtered = events.filter((e: any) => {
+      const start = new Date(e.dtstart || e.begin);
+      return start >= now && start <= endDate;
+    });
+
+    if (filtered.length === 0) return `אין אירועים ב-${days} הימים הקרובים.`;
+
+    return filtered.map((e: any) => {
+      const start = new Date(e.dtstart || e.begin);
+      const time = start.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+      const date = start.toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'short' });
+      return `📅 ${date} ${time} — ${e.title || e.eventTitle || 'ללא כותרת'}${e.eventLocation ? ` (${e.eventLocation})` : ''}`;
+    }).join('\n');
+  } catch {
+    // Fallback: content provider query
+    try {
+      const raw = await runCommand(
+        `content query --uri content://com.android.calendar/events --projection title:dtstart:dtend:eventLocation 2>/dev/null | head -20`,
+        undefined, 10000
+      );
+      if (!raw.trim()) return 'לא הצלחתי לגשת ללוח השנה. וודא ש-Termux:API מותקן עם הרשאת calendar.';
+      return raw;
+    } catch {
+      return 'לא הצלחתי לקרוא את לוח השנה. וודא ש-termux-api מותקן וניתנו הרשאות.';
+    }
+  }
+}
+
+export async function calendarAdd(title: string, startTime: string, endTime?: string, location?: string): Promise<string> {
+  try {
+    const start = new Date(startTime);
+    const end = endTime ? new Date(endTime) : new Date(start.getTime() + 60 * 60 * 1000); // Default 1 hour
+
+    const startMs = start.getTime();
+    const endMs = end.getTime();
+
+    // Use content provider to insert event
+    let cmd = `content insert --uri content://com.android.calendar/events`;
+    cmd += ` --bind title:s:"${title}"`;
+    cmd += ` --bind dtstart:l:${startMs}`;
+    cmd += ` --bind dtend:l:${endMs}`;
+    cmd += ` --bind calendar_id:i:1`;
+    cmd += ` --bind eventTimezone:s:Asia/Jerusalem`;
+    if (location) cmd += ` --bind eventLocation:s:"${location}"`;
+    cmd += ` 2>/dev/null`;
+
+    await runCommand(cmd, undefined, 5000);
+
+    const dateStr = start.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
+    const timeStr = start.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+
+    return `📅 אירוע נוצר: "${title}" ב-${dateStr} ${timeStr}${location ? ` ב${location}` : ''}`;
+  } catch (err) {
+    return `שגיאה ביצירת אירוע: ${(err as Error).message}`;
+  }
+}
+
+// ===== WHATSAPP =====
+
+export async function whatsappMessages(): Promise<string> {
+  try {
+    const raw = await runCommand('termux-notification-list 2>/dev/null', undefined, 5000);
+    const notifications = JSON.parse(raw);
+
+    const waMessages = notifications.filter(
+      (n: any) => n.packageName === 'com.whatsapp' || n.packageName === 'com.whatsapp.w4b'
+    );
+
+    if (waMessages.length === 0) return 'אין הודעות ווטסאפ חדשות.';
+
+    return `הודעות ווטסאפ (${waMessages.length}):\n` + waMessages.map((n: any) => {
+      return `💬 ${n.title || 'Unknown'}: ${n.content || n.text || '(ריק)'}`;
+    }).join('\n');
+  } catch (err) {
+    return `שגיאה בקריאת הודעות: ${(err as Error).message}`;
+  }
+}
+
+export async function whatsappReply(contactName: string, message: string): Promise<string> {
+  try {
+    const raw = await runCommand('termux-notification-list 2>/dev/null', undefined, 5000);
+    const notifications = JSON.parse(raw);
+
+    const waNotif = notifications.find(
+      (n: any) =>
+        (n.packageName === 'com.whatsapp' || n.packageName === 'com.whatsapp.w4b') &&
+        n.title && n.title.toLowerCase().includes(contactName.toLowerCase())
+    );
+
+    if (!waNotif) {
+      return `לא מצאתי הודעה מ-"${contactName}" בהתראות. ייתכן שההודעה כבר נקראה.`;
+    }
+
+    // Try notification reply
+    if (waNotif.key) {
+      await runCommand(
+        `termux-notification-reply -k "${waNotif.key}" "${message.replace(/"/g, '\\"')}" 2>/dev/null`,
+        undefined, 5000
+      );
+      return `✅ שלחתי ל-${contactName}: "${message}"`;
+    }
+
+    return 'לא הצלחתי לשלוח תשובה — ההתראה לא תומכת ב-reply.';
+  } catch (err) {
+    return `שגיאה: ${(err as Error).message}`;
+  }
+}

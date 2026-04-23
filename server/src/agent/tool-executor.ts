@@ -229,6 +229,29 @@ async function executeToolInternal(
       return `📂 נמחקו ${count} תיקיות ריקות.`;
     }
 
+    // App Launcher
+    case 'open_app':
+      return termuxApi.openApp(input.app_name as string);
+    case 'list_apps':
+      return termuxApi.listApps(input.filter as string | undefined);
+
+    // Calendar
+    case 'calendar_list':
+      return termuxApi.calendarList((input.days as number) || 1);
+    case 'calendar_add':
+      return termuxApi.calendarAdd(
+        input.title as string,
+        input.start_time as string,
+        input.end_time as string | undefined,
+        input.location as string | undefined
+      );
+
+    // WhatsApp
+    case 'whatsapp_messages':
+      return termuxApi.whatsappMessages();
+    case 'whatsapp_reply':
+      return termuxApi.whatsappReply(input.contact_name as string, input.message as string);
+
     default:
       return `Unknown tool: ${toolName}`;
   }

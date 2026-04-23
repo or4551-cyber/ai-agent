@@ -111,10 +111,13 @@ button:active {
   -webkit-backdrop-filter: blur(12px);
 }
 
-/* Mobile-friendly tap targets */
+/* Mobile-friendly tap targets — exclude bottom nav */
 @media (max-width: 768px) {
   button, a, input, textarea {
     min-height: 44px;
+  }
+  nav.bottom-nav a {
+    min-height: unset;
   }
 }
 

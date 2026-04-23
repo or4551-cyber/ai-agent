@@ -5,7 +5,8 @@ import { AgentWebSocket, WSEvent } from '@/lib/websocket';
 import MessageBubble from './MessageBubble';
 import TypingIndicator from './TypingIndicator';
 import ChatInput, { ImageAttachment } from './ChatInput';
-import { Wifi, WifiOff, Trash2, DollarSign, History, Plus } from 'lucide-react';
+import { Wifi, WifiOff, Trash2, DollarSign, History, Plus, Sparkles } from 'lucide-react';
+import Link from 'next/link';
 import {
   listConversations, getConversation, saveConversation,
   deleteConversation, generateTitle, Conversation, StoredMessage
@@ -179,6 +180,16 @@ export default function ChatWindow() {
       ws.disconnect();
     };
   }, [scrollToBottom]);
+
+  // Auto-send pending command from capabilities page
+  useEffect(() => {
+    if (!connected) return;
+    const pending = sessionStorage.getItem('pending_command');
+    if (pending) {
+      sessionStorage.removeItem('pending_command');
+      setTimeout(() => handleSend(pending), 300);
+    }
+  }, [connected]);
 
   const handleSend = (message: string, images?: ImageAttachment[]) => {
     const userMsg: Message = {
@@ -394,6 +405,14 @@ export default function ChatWindow() {
                 </button>
               ))}
             </div>
+            <Link
+              href="/capabilities"
+              className="mt-4 flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 transition-all animate-slide-up"
+              style={{ animationDelay: '500ms', animationFillMode: 'backwards' }}
+            >
+              <Sparkles size={13} />
+              ראה את כל היכולות שלי
+            </Link>
           </div>
         )}
 

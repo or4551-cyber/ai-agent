@@ -300,6 +300,10 @@ export default function DashboardPage() {
             <HardDrive size={20} className="text-amber-400" />
             <span className="text-[10px] font-medium">אחסון</span>
           </Link>
+          <Link href="/capabilities" className="col-span-4 flex items-center justify-center gap-2 px-3 py-2.5 rounded-2xl border border-purple-500/20 bg-purple-500/5 hover:bg-purple-500/10 active:scale-[0.98] transition-all">
+            <Sparkles size={15} className="text-purple-400" />
+            <span className="text-[11px] font-medium text-purple-400">מה אני יכול לעשות? — כל היכולות</span>
+          </Link>
         </div>
       </div>
 
