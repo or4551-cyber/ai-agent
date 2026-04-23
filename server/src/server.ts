@@ -312,10 +312,11 @@ app.get('/api/device-stats', authQuery, async (_req, res) => {
     stats.volume = 7;
   }
 
-  // Brightness
+  // Brightness (read from Android settings)
   try {
-    const raw = execSync('termux-brightness 2>/dev/null', { timeout: 2000 }).toString();
-    stats.brightness = parseInt(raw.trim()) || 50;
+    const raw = execSync('settings get system screen_brightness 2>/dev/null', { timeout: 2000 }).toString();
+    const val = parseInt(raw.trim());
+    stats.brightness = isNaN(val) ? 50 : Math.round(val / 255 * 100);
   } catch {
     stats.brightness = 50;
   }
@@ -324,85 +325,157 @@ app.get('/api/device-stats', authQuery, async (_req, res) => {
   try {
     const raw = execSync('termux-wifi-connectioninfo 2>/dev/null', { timeout: 3000 }).toString();
     const wifi = JSON.parse(raw);
-    stats.wifi = wifi.supplicant_state === 'COMPLETED' || wifi.ip !== '';
+    stats.wifi = wifi.supplicant_state === 'COMPLETED' || (wifi.ip && wifi.ip !== '' && wifi.ip !== '<unknown ssid>');
   } catch {
     stats.wifi = false;
   }
 
-  stats.bluetooth = false;
-  stats.flashlight = false;
+  // Bluetooth (check via settings)
+  try {
+    const raw = execSync('settings get global bluetooth_on 2>/dev/null', { timeout: 2000 }).toString();
+    stats.bluetooth = raw.trim() === '1';
+  } catch {
+    stats.bluetooth = false;
+  }
+
+  stats.flashlight = flashlightOn ?? false;
 
   res.json(stats);
 });
+
+// Track flashlight state (Termux:API has no query command)
+let flashlightOn = false;
 
 app.post('/api/device-action', authQuery, async (req, res) => {
   const { execSync } = require('child_process');
   const { action } = req.body;
   const results: Record<string, string> = {};
 
+  const run = (cmd: string, timeout = 5000): string => {
+    try { return execSync(cmd, { timeout }).toString().trim(); }
+    catch { return ''; }
+  };
+
   try {
     switch (action) {
-      case 'toggle_wifi':
-        execSync('termux-wifi-enable toggle 2>/dev/null || svc wifi enable 2>/dev/null', { timeout: 3000 });
-        results.message = 'WiFi toggled';
+      // --- WiFi: detect state, then flip ---
+      case 'toggle_wifi': {
+        let wifiOn = false;
+        try {
+          const raw = run('termux-wifi-connectioninfo', 5000);
+          const info = JSON.parse(raw);
+          wifiOn = info.supplicant_state === 'COMPLETED' || (info.ip && info.ip !== '<unknown ssid>');
+        } catch {}
+        run(`termux-wifi-enable ${wifiOn ? 'false' : 'true'}`);
+        results.message = wifiOn ? 'WiFi כבוי' : 'WiFi דולק';
         break;
+      }
+
+      // --- Bluetooth: open system dialog ---
       case 'toggle_bluetooth':
-        execSync('am start -a android.bluetooth.adapter.action.REQUEST_ENABLE 2>/dev/null', { timeout: 3000 });
-        results.message = 'Bluetooth dialog opened';
+        run('am start -a android.settings.BLUETOOTH_SETTINGS');
+        results.message = 'הגדרות בלוטות\' נפתחו';
         break;
+
+      // --- Flashlight: on/off toggle ---
       case 'toggle_flashlight':
-        execSync('termux-torch toggle 2>/dev/null', { timeout: 2000 });
-        results.message = 'Flashlight toggled';
+        flashlightOn = !flashlightOn;
+        run(`termux-torch ${flashlightOn ? 'on' : 'off'}`);
+        results.message = flashlightOn ? 'פנס דלוק' : 'פנס כבוי';
         break;
+
+      // --- Vibrate ---
       case 'vibrate':
-        execSync('termux-vibrate -d 300 2>/dev/null', { timeout: 2000 });
-        results.message = 'Vibrated';
+        run('termux-vibrate -d 300');
+        results.message = 'רטט';
         break;
-      case 'volume_up':
-        execSync('input keyevent KEYCODE_VOLUME_UP 2>/dev/null', { timeout: 2000 });
-        results.message = 'Volume up';
+
+      // --- Volume: read current, adjust, set ---
+      case 'volume_up': {
+        let vol = 7;
+        try {
+          const raw = run('termux-volume', 3000);
+          const volumes = JSON.parse(raw);
+          const music = volumes.find((v: any) => v.stream === 'music');
+          vol = music?.volume ?? 7;
+        } catch {}
+        const newVol = Math.min(vol + 1, 15);
+        run(`termux-volume music ${newVol}`);
+        results.message = `ווליום: ${newVol}/15`;
         break;
-      case 'volume_down':
-        execSync('input keyevent KEYCODE_VOLUME_DOWN 2>/dev/null', { timeout: 2000 });
-        results.message = 'Volume down';
+      }
+      case 'volume_down': {
+        let vol = 7;
+        try {
+          const raw = run('termux-volume', 3000);
+          const volumes = JSON.parse(raw);
+          const music = volumes.find((v: any) => v.stream === 'music');
+          vol = music?.volume ?? 7;
+        } catch {}
+        const newVol = Math.max(vol - 1, 0);
+        run(`termux-volume music ${newVol}`);
+        results.message = `ווליום: ${newVol}/15`;
         break;
-      case 'brightness_up':
-        execSync('termux-brightness 200 2>/dev/null', { timeout: 2000 });
-        results.message = 'Brightness up';
+      }
+
+      // --- Brightness: adjust by 30 (range 0-255) ---
+      case 'brightness_up': {
+        let cur = 128;
+        try {
+          const raw = run('settings get system screen_brightness', 2000);
+          cur = parseInt(raw) || 128;
+        } catch {}
+        const newBr = Math.min(cur + 30, 255);
+        run(`termux-brightness ${newBr}`);
+        results.message = `בהירות: ${Math.round(newBr / 255 * 100)}%`;
         break;
-      case 'brightness_down':
-        execSync('termux-brightness 50 2>/dev/null', { timeout: 2000 });
-        results.message = 'Brightness down';
+      }
+      case 'brightness_down': {
+        let cur = 128;
+        try {
+          const raw = run('settings get system screen_brightness', 2000);
+          cur = parseInt(raw) || 128;
+        } catch {}
+        const newBr = Math.max(cur - 30, 5);
+        run(`termux-brightness ${newBr}`);
+        results.message = `בהירות: ${Math.round(newBr / 255 * 100)}%`;
         break;
+      }
+
+      // --- Media: use am broadcast for widest player support ---
       case 'media_play_pause':
-        execSync('input keyevent KEYCODE_MEDIA_PLAY_PAUSE 2>/dev/null', { timeout: 2000 });
+        run('am broadcast --user 0 -a com.android.music.musicservicecommand --es command togglepause');
         results.message = 'Play/Pause';
         break;
       case 'media_next':
-        execSync('input keyevent KEYCODE_MEDIA_NEXT 2>/dev/null', { timeout: 2000 });
-        results.message = 'Next track';
+        run('am broadcast --user 0 -a com.android.music.musicservicecommand --es command next');
+        results.message = 'שיר הבא';
         break;
       case 'media_previous':
-        execSync('input keyevent KEYCODE_MEDIA_PREVIOUS 2>/dev/null', { timeout: 2000 });
-        results.message = 'Previous track';
+        run('am broadcast --user 0 -a com.android.music.musicservicecommand --es command previous');
+        results.message = 'שיר קודם';
         break;
+
+      // --- Quick actions ---
       case 'open_dialer':
-        execSync('am start -a android.intent.action.DIAL 2>/dev/null', { timeout: 3000 });
-        results.message = 'Dialer opened';
+        run('am start -a android.intent.action.DIAL');
+        results.message = 'חייגן נפתח';
         break;
       case 'screenshot':
-        execSync('termux-screenshot /storage/emulated/0/Screenshots/ai-screenshot.png 2>/dev/null || screencap -p /storage/emulated/0/Screenshots/ai-screenshot.png 2>/dev/null', { timeout: 5000 });
-        results.message = 'Screenshot taken';
+        run('termux-toast "מצלם מסך..."');
+        run('su -c "screencap -p /storage/emulated/0/Screenshots/ai-screenshot-$(date +%s).png" 2>/dev/null || termux-toast "צילום מסך דורש הרשאות root"');
+        results.message = 'צילום מסך';
         break;
       case 'screenrecord':
-        execSync('termux-toast "הקלטה מתחילה..." 2>/dev/null', { timeout: 2000 });
-        results.message = 'Recording info sent';
+        run('termux-toast "הקלטה לא זמינה ללא root"');
+        results.message = 'דורש root';
         break;
+
       default:
-        results.message = `Unknown action: ${action}`;
+        results.message = `פעולה לא מוכרת: ${action}`;
     }
   } catch (err) {
-    results.message = `Error: ${(err as Error).message}`;
+    results.message = `שגיאה: ${(err as Error).message}`;
   }
 
   res.json(results);

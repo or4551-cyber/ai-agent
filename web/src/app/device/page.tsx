@@ -6,7 +6,7 @@ import {
   Flashlight, Sun, Moon, Volume2, VolumeX,
   Smartphone, HardDrive, Signal, ThermometerSun,
   Play, Pause, SkipForward, SkipBack, Music,
-  RefreshCw, ChevronLeft, Vibrate, Phone, ScreenShare,
+  RefreshCw, ChevronLeft, Vibrate, Phone, ScreenShare, Loader2, Check,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -41,6 +41,8 @@ export default function DevicePage() {
   const [mediaPlaying, setMediaPlaying] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [animateIn, setAnimateIn] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -67,6 +69,7 @@ export default function DevicePage() {
   }, [fetchStats]);
 
   const sendAction = async (action: string) => {
+    setActionLoading(action);
     try {
       const base = getWsBaseUrl();
       const token = process.env.NEXT_PUBLIC_AUTH_TOKEN || 'dev-token';
@@ -78,10 +81,17 @@ export default function DevicePage() {
       if (res.ok) {
         const data = await res.json();
         if (data.stats) setStats(data.stats);
+        if (data.message) {
+          setActionFeedback(data.message);
+          setTimeout(() => setActionFeedback(null), 2000);
+        }
       }
-      setTimeout(fetchStats, 500);
+      setTimeout(fetchStats, 800);
     } catch (e) {
-      console.error('Action failed:', e);
+      setActionFeedback('שגיאה בביצוע הפעולה');
+      setTimeout(() => setActionFeedback(null), 2000);
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -119,6 +129,13 @@ export default function DevicePage() {
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
+
+      {/* Toast feedback */}
+      {actionFeedback && (
+        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-2xl bg-[var(--primary)] text-white text-sm font-medium shadow-lg shadow-[var(--primary)]/30 animate-fade-in">
+          {actionFeedback}
+        </div>
+      )}
 
       <div className="px-4 py-5 space-y-5">
         {/* === Battery & Storage Row === */}
@@ -237,6 +254,7 @@ export default function DevicePage() {
             label="בהירות"
             value={stats.brightness}
             max={100}
+            unit="%"
             color="#fbbf24"
             onUp={() => sendAction('brightness_up')}
             onDown={() => sendAction('brightness_down')}
@@ -306,9 +324,9 @@ function ToggleButton({ icon, label, active, color, onClick }: {
   );
 }
 
-function SliderCard({ icon, label, value, max, color, onUp, onDown }: {
+function SliderCard({ icon, label, value, max, color, unit, onUp, onDown }: {
   icon: React.ReactNode; label: string; value: number; max: number; color: string;
-  onUp: () => void; onDown: () => void;
+  unit?: string; onUp: () => void; onDown: () => void;
 }) {
   const percent = Math.round((value / max) * 100);
   return (
@@ -316,7 +334,7 @@ function SliderCard({ icon, label, value, max, color, onUp, onDown }: {
       <div className="flex items-center gap-2 mb-3">
         {icon}
         <span className="text-xs font-semibold">{label}</span>
-        <span className="text-xs text-[var(--muted-foreground)] mr-auto font-mono">{value}/{max}</span>
+        <span className="text-xs text-[var(--muted-foreground)] mr-auto font-mono">{value}{unit || `/${max}`}</span>
       </div>
       <div className="relative h-2 rounded-full bg-[var(--muted)] overflow-hidden mb-3">
         <div
