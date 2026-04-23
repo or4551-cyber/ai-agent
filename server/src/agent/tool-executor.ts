@@ -10,10 +10,13 @@ import { webBrowse, webSearch } from '../tools/web-browse';
 import { AgentMemory } from './memory';
 import { ReminderService } from '../services/reminders';
 import { RoutineService } from '../services/routines';
+import { StorageScanner } from '../services/storage-scanner';
+import { speechToText, textToSpeech } from '../tools/voice';
 
 const memory = new AgentMemory();
 const reminderService = new ReminderService();
 const routineService = new RoutineService();
+const storageScanner = new StorageScanner();
 
 export interface ExecutionResult {
   output: string;
@@ -179,6 +182,52 @@ async function executeToolInternal(
       return routineService.toggle(input.id as string) ? 'Routine toggled.' : 'Routine not found.';
     case 'routine_delete':
       return routineService.remove(input.id as string) ? 'Routine deleted.' : 'Routine not found.';
+
+    // Voice
+    case 'speech_to_text':
+      return speechToText();
+    case 'text_to_speech':
+      return textToSpeech(input.text as string, (input.lang as string) || 'he');
+
+    // Storage Scanner
+    case 'storage_scan': {
+      const scanResult = await storageScanner.scan();
+      const lines = [
+        `📊 סריקה הושלמה:`,
+        `סה״כ קבצים: ${scanResult.totalFiles}`,
+        `נפח כללי: ${scanResult.totalSizeMb} MB`,
+        `מקום פנוי: ${scanResult.freeSpaceMb} MB`,
+        ``,
+        `📁 קבצים גדולים (>50MB): ${scanResult.largeFiles.length}`,
+        ...scanResult.largeFiles.slice(0, 10).map(f => `  - ${f.name} (${f.sizeMb}MB, ${f.category})`),
+        ``,
+        `🗁️ קבצי זבל: ${scanResult.junkFiles.length} (סה״כ ${scanResult.junkFiles.reduce((s, f) => s + f.sizeMb, 0).toFixed(1)}MB)`,
+        `🗃️ קבצי cache: ${scanResult.cacheFiles.length} (סה״כ ${scanResult.cacheFiles.reduce((s, f) => s + f.sizeMb, 0).toFixed(1)}MB)`,
+        `🔄 קבצים כפולים: ${scanResult.duplicates.length} קבוצות`,
+        `📂 תיקיות ריקות: ${scanResult.emptyFolders.length}`,
+        ``,
+        `✨ פוטנציאל חיסכון: ${scanResult.totalSavingsMb} MB`,
+      ];
+      return lines.join('\n');
+    }
+    case 'storage_last_scan': {
+      const last = storageScanner.getLastResult();
+      if (!last) return 'אין סריקה קודמת. הרץ storage_scan קודם.';
+      return JSON.stringify(last, null, 2);
+    }
+    case 'storage_delete_files': {
+      const paths = input.paths as string[];
+      const { deleted, errors } = storageScanner.deleteFiles(paths);
+      return `נמחקו ${deleted} קבצים.${errors.length > 0 ? '\nשגיאות: ' + errors.join(', ') : ''}`;
+    }
+    case 'storage_clear_cache': {
+      const { freedMb } = storageScanner.clearCache();
+      return `🧹 ה-cache נוקה! שוחררו ${freedMb} MB.`;
+    }
+    case 'storage_delete_empty_folders': {
+      const count = storageScanner.deleteEmptyFolders();
+      return `📂 נמחקו ${count} תיקיות ריקות.`;
+    }
 
     default:
       return `Unknown tool: ${toolName}`;

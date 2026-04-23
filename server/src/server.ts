@@ -13,6 +13,8 @@ import { ReminderService } from './services/reminders';
 import { RoutineService } from './services/routines';
 import { generateBriefing } from './services/briefing';
 import { UserProfileService } from './services/user-profile';
+import { StorageScanner } from './services/storage-scanner';
+import { SmartAlertsService } from './services/smart-alerts';
 
 dotenv.config();
 
@@ -25,6 +27,9 @@ const routineService = new RoutineService();
 routineService.start();
 
 const userProfileService = new UserProfileService();
+const storageScanner = new StorageScanner();
+const smartAlerts = new SmartAlertsService();
+smartAlerts.start();
 
 if (process.env.ANTHROPIC_API_KEY) {
   observer = new ObserverService(process.env.ANTHROPIC_API_KEY);
@@ -159,6 +164,70 @@ app.post('/api/profile/name', authMiddleware, (req, res) => {
     return;
   }
   userProfileService.setName(name);
+  res.json({ success: true });
+});
+
+// ===== STORAGE SCANNER API =====
+
+app.get('/api/storage/status', authMiddleware, (_req, res) => {
+  res.json({
+    scanning: storageScanner.isScanning(),
+    lastScan: storageScanner.getLastResult()?.timestamp || null,
+  });
+});
+
+app.get('/api/storage/last-scan', authMiddleware, (_req, res) => {
+  const result = storageScanner.getLastResult();
+  if (!result) {
+    res.json({ result: null });
+    return;
+  }
+  res.json({ result });
+});
+
+app.post('/api/storage/scan', authMiddleware, async (_req, res) => {
+  if (storageScanner.isScanning()) {
+    res.status(409).json({ error: 'Scan already in progress' });
+    return;
+  }
+  const result = await storageScanner.scan();
+  res.json({ result });
+});
+
+app.post('/api/storage/clear-cache', authMiddleware, (_req, res) => {
+  const { freedMb } = storageScanner.clearCache();
+  res.json({ freedMb });
+});
+
+app.post('/api/storage/delete-empty', authMiddleware, (_req, res) => {
+  const count = storageScanner.deleteEmptyFolders();
+  res.json({ deleted: count });
+});
+
+app.post('/api/storage/delete-files', authMiddleware, (req, res) => {
+  const { paths } = req.body;
+  if (!Array.isArray(paths)) {
+    res.status(400).json({ error: 'paths array required' });
+    return;
+  }
+  const result = storageScanner.deleteFiles(paths);
+  res.json(result);
+});
+
+// ===== SMART ALERTS API =====
+
+app.get('/api/alerts', authMiddleware, (req, res) => {
+  const unread = req.query.unread === 'true';
+  res.json({ alerts: smartAlerts.getAlerts(unread), unreadCount: smartAlerts.getUnreadCount() });
+});
+
+app.post('/api/alerts/read/:id', authMiddleware, (req, res) => {
+  smartAlerts.markRead(req.params.id as string);
+  res.json({ success: true });
+});
+
+app.post('/api/alerts/read-all', authMiddleware, (_req, res) => {
+  smartAlerts.markAllRead();
   res.json({ success: true });
 });
 

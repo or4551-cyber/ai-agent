@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageCircle, FolderOpen, Image, Settings, Bot, LayoutDashboard } from 'lucide-react';
+import { MessageCircle, FolderOpen, Image, Settings, Bot, LayoutDashboard, HardDrive } from 'lucide-react';
 
 const NAV_ITEMS = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/', icon: MessageCircle, label: 'Chat' },
   { href: '/files', icon: FolderOpen, label: 'Files' },
   { href: '/gallery', icon: Image, label: 'Gallery' },
+  { href: '/storage', icon: HardDrive, label: 'Storage' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
 

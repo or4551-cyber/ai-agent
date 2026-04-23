@@ -172,6 +172,71 @@ export async function setProfilePreference(key: string, value: string): Promise<
   return apiFetch('/api/profile/preference', { method: 'POST', body: JSON.stringify({ key, value }) });
 }
 
+// ===== SMART ALERTS =====
+
+export interface SmartAlert {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  priority: 'low' | 'medium' | 'high';
+  actionable: boolean;
+  action?: string;
+}
+
+export async function getAlerts(unreadOnly = false): Promise<{ alerts: SmartAlert[]; unreadCount: number }> {
+  return apiFetch(`/api/alerts${unreadOnly ? '?unread=true' : ''}`);
+}
+
+export async function markAlertRead(id: string): Promise<void> {
+  return apiFetch(`/api/alerts/read/${id}`, { method: 'POST' });
+}
+
+export async function markAllAlertsRead(): Promise<void> {
+  return apiFetch('/api/alerts/read-all', { method: 'POST' });
+}
+
+// ===== STORAGE SCANNER =====
+
+export interface ScanResult {
+  timestamp: string;
+  totalFiles: number;
+  totalSizeMb: number;
+  freeSpaceMb: number;
+  duplicates: { hash: string; sizeMb: number; files: string[] }[];
+  largeFiles: { path: string; name: string; sizeMb: number; modified: string; category: string }[];
+  junkFiles: { path: string; name: string; sizeMb: number; category: string }[];
+  cacheFiles: { path: string; name: string; sizeMb: number }[];
+  emptyFolders: string[];
+  totalSavingsMb: number;
+}
+
+export async function getStorageStatus(): Promise<{ scanning: boolean; lastScan: string | null }> {
+  return apiFetch('/api/storage/status');
+}
+
+export async function getLastScan(): Promise<{ result: ScanResult | null }> {
+  return apiFetch('/api/storage/last-scan');
+}
+
+export async function startStorageScan(): Promise<{ result: ScanResult }> {
+  return apiFetch('/api/storage/scan', { method: 'POST' });
+}
+
+export async function clearCache(): Promise<{ freedMb: number }> {
+  return apiFetch('/api/storage/clear-cache', { method: 'POST' });
+}
+
+export async function deleteEmptyFolders(): Promise<{ deleted: number }> {
+  return apiFetch('/api/storage/delete-empty', { method: 'POST' });
+}
+
+export async function deleteFiles(paths: string[]): Promise<{ deleted: number; errors: string[] }> {
+  return apiFetch('/api/storage/delete-files', { method: 'POST', body: JSON.stringify({ paths }) });
+}
+
 // ===== DASHBOARD =====
 
 export async function getDashboard(): Promise<Record<string, unknown>> {

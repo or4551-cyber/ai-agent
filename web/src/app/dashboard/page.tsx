@@ -4,13 +4,14 @@ import { useState, useEffect, useRef } from 'react';
 import {
   getBriefing, getSuggestions, triggerDigest, Suggestion,
   getReminders, completeReminder, addReminder, Reminder,
-  getObserverStatus, getUserProfile, UserProfile
+  getObserverStatus, getUserProfile, UserProfile,
+  getAlerts, markAllAlertsRead, SmartAlert
 } from '@/lib/api';
 import {
   Battery, BatteryCharging, Loader2, MessageSquare,
   Lightbulb, Sparkles, Eye, CheckCircle2, Circle,
   Plus, Bell, Cloud, Cpu, ChevronRight, RefreshCw,
-  Camera, Search, FolderOpen, Brain, TrendingUp, Zap
+  Camera, Search, FolderOpen, Brain, TrendingUp, Zap, AlertCircle, HardDrive
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -20,6 +21,9 @@ export default function DashboardPage() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [observerStatus, setObserverStatus] = useState<Record<string, unknown> | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [alerts, setAlerts] = useState<SmartAlert[]>([]);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const [showAlerts, setShowAlerts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [digestLoading, setDigestLoading] = useState(false);
@@ -30,18 +34,21 @@ export default function DashboardPage() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const [b, r, s, obs, prof] = await Promise.all([
+      const [b, r, s, obs, prof, al] = await Promise.all([
         getBriefing().catch(() => null),
         getReminders().catch(() => ({ reminders: [] })),
         getSuggestions().catch(() => ({ suggestions: [] })),
         getObserverStatus().catch(() => null),
         getUserProfile().catch(() => null),
+        getAlerts().catch(() => ({ alerts: [], unreadCount: 0 })),
       ]);
       setBriefing(b);
       setReminders(r.reminders);
       setSuggestions(s.suggestions);
       setObserverStatus(obs);
       setProfile(prof);
+      setAlerts(al.alerts);
+      setUnreadAlerts(al.unreadCount);
     } catch {} finally { setLoading(false); setRefreshing(false); }
   };
 
@@ -90,12 +97,40 @@ export default function DashboardPage() {
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Greeting Header */}
       <div className="px-5 pt-6 pb-4 bg-gradient-to-b from-[var(--primary)]/10 to-transparent relative">
-        <button
-          onClick={() => load(true)}
-          className="absolute top-5 left-4 p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
-        >
-          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-        </button>
+        <div className="absolute top-5 left-4 flex items-center gap-1">
+          <button
+            onClick={() => { setShowAlerts(!showAlerts); if (!showAlerts && unreadAlerts > 0) { markAllAlertsRead(); setUnreadAlerts(0); } }}
+            className="relative p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
+          >
+            <Bell size={16} />
+            {unreadAlerts > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                {unreadAlerts}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => load(true)}
+            className="p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
+          >
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
+        {/* Alerts dropdown */}
+        {showAlerts && alerts.length > 0 && (
+          <div className="absolute top-14 left-4 right-4 z-50 rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-xl max-h-64 overflow-y-auto animate-fade-in">
+            <div className="p-3 border-b border-[var(--border)] text-xs font-semibold flex items-center gap-1.5">
+              <AlertCircle size={13} /> התראות חכמות
+            </div>
+            {alerts.slice(0, 8).map(a => (
+              <div key={a.id} className={`px-3 py-2.5 border-b border-[var(--border)] last:border-b-0 ${!a.read ? 'bg-[var(--primary)]/5' : ''}`}>
+                <div className="text-xs font-medium">{a.title}</div>
+                <div className="text-[10px] text-[var(--muted-foreground)]">{a.message}</div>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="text-3xl font-bold mb-0.5 tracking-tight">{time}</div>
         <div className="text-sm text-[var(--muted-foreground)]">{greeting} &middot; {date}</div>
       </div>
@@ -245,18 +280,22 @@ export default function DashboardPage() {
       {/* Quick Actions */}
       <div className="px-4 pb-6">
         <h2 className="text-xs font-semibold text-[var(--muted-foreground)] mb-2 tracking-wider">פעולות מהירות</h2>
-        <div className="grid grid-cols-3 gap-2">
-          <Link href="/" className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
+        <div className="grid grid-cols-4 gap-2">
+          <Link href="/" className="flex flex-col items-center gap-1.5 px-2 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
             <MessageSquare size={20} className="text-[var(--primary)]" />
-            <span className="text-[11px] font-medium">צ'אט</span>
+            <span className="text-[10px] font-medium">צ'אט</span>
           </Link>
-          <Link href="/files" className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
+          <Link href="/files" className="flex flex-col items-center gap-1.5 px-2 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
             <FolderOpen size={20} className="text-purple-400" />
-            <span className="text-[11px] font-medium">קבצים</span>
+            <span className="text-[10px] font-medium">קבצים</span>
           </Link>
-          <Link href="/gallery" className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
+          <Link href="/gallery" className="flex flex-col items-center gap-1.5 px-2 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
             <Camera size={20} className="text-emerald-400" />
-            <span className="text-[11px] font-medium">גלריה</span>
+            <span className="text-[10px] font-medium">גלריה</span>
+          </Link>
+          <Link href="/storage" className="flex flex-col items-center gap-1.5 px-2 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
+            <HardDrive size={20} className="text-amber-400" />
+            <span className="text-[10px] font-medium">אחסון</span>
           </Link>
         </div>
       </div>

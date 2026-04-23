@@ -508,6 +508,101 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== VOICE =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'speech_to_text',
+      description: 'Listen to the user speaking through the phone microphone and convert to text. Opens the speech recognition dialog.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'text_to_speech',
+      description: 'Read text aloud through the phone speaker. Use this to speak to the user.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'Text to speak aloud' },
+          lang: { type: 'string', description: 'Language code (default: he)', enum: ['he', 'en', 'ar'] },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  // ===== STORAGE SCANNER =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'storage_scan',
+      description: 'Deep scan the phone storage to find large files, duplicates, junk/cache files, and empty folders. Returns a report with potential cleanup savings.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'storage_last_scan',
+      description: 'Get the result of the last storage scan without scanning again.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    dangerLevel: 'dangerous',
+    definition: {
+      name: 'storage_delete_files',
+      description: 'Delete specific files from storage. Requires user approval. Provide array of full file paths.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          paths: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Full paths of files to delete',
+          },
+        },
+        required: ['paths'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'dangerous',
+    definition: {
+      name: 'storage_clear_cache',
+      description: 'Clear all cache and thumbnail directories on the phone. Frees significant space.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'storage_delete_empty_folders',
+      description: 'Delete all empty folders in storage.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
 ];
 
 export function getToolDefinitions(): ToolDefinition[] {
