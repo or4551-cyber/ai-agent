@@ -181,6 +181,47 @@ export async function getNotifications(): Promise<string> {
   }
 }
 
+// ===== SMART BRIEFING =====
+
+export async function smartBriefing(): Promise<string> {
+  const sections: string[] = [];
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'בוקר טוב! ☀️' : hour < 17 ? 'צהריים טובים! 🌤️' : hour < 21 ? 'ערב טוב! 🌆' : 'לילה טוב! 🌙';
+  sections.push(greeting);
+  sections.push(`📅 ${new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}`);
+  sections.push('---');
+
+  // Battery
+  try {
+    const raw = await runCommand('termux-battery-status 2>/dev/null', undefined, 5000);
+    const b = JSON.parse(raw);
+    const icon = b.status === 'CHARGING' ? '🔌' : b.percentage > 50 ? '🔋' : '🪫';
+    sections.push(`${icon} סוללה: ${b.percentage}%${b.status === 'CHARGING' ? ' (טוען)' : ''}`);
+  } catch { sections.push('🔋 סוללה: לא זמין'); }
+
+  // Calendar
+  try {
+    const cal = await calendarList(1);
+    sections.push(`\n📆 יומן היום:\n${cal}`);
+  } catch { sections.push('📆 יומן: לא זמין'); }
+
+  // WhatsApp
+  try {
+    const wa = await whatsappMessages();
+    sections.push(`\n${wa}`);
+  } catch { sections.push('💬 ווטסאפ: לא זמין'); }
+
+  // Storage
+  try {
+    const raw = await runCommand('df -h /storage/emulated/0 2>/dev/null | tail -1', undefined, 3000);
+    if (raw.trim()) {
+      sections.push(`\n💾 אחסון: ${raw.trim().split(/\s+/).slice(1, 4).join(' | ')}`);
+    }
+  } catch {}
+
+  return sections.join('\n');
+}
+
 // ===== QR CODE SCANNER =====
 
 export async function scanQrCode(imagePath?: string): Promise<string> {

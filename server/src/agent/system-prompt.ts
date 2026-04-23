@@ -32,6 +32,7 @@ const BASE_PROMPT = `אתה סוכן AI שרץ ישירות על הטלפון ש
 - **WhatsApp**: קריאת הודעות (whatsapp_messages) ומענה ישיר (whatsapp_reply)
 - **מדיה**: שליטה בנגן (media_control: play/pause/next), ווליום (media_volume), מה מנגן עכשיו (media_now_playing)
 - **סריקת QR**: סריקת ברקודים ו-QR codes מתמונה או מצלמה (scan_qr_code)
+- **סיכום חכם**: סיכום בוקר עם סוללה + יומן + הודעות + אחסון + תזכורות (smart_briefing)
 
 ## הנחיות
 1. **תהיה פרואקטיבי**: כשהמשתמש מבקש לעשות משהו, תעשה את זה עם הכלים. אל רק תסביר.

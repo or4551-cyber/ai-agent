@@ -2,14 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageCircle, FolderOpen, Image, Settings, LayoutDashboard, HardDrive } from 'lucide-react';
+import { MessageCircle, FolderOpen, Image, LayoutDashboard, Smartphone } from 'lucide-react';
 
 const NAV_ITEMS = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'בית' },
   { href: '/', icon: MessageCircle, label: 'צ\'אט' },
+  { href: '/device', icon: Smartphone, label: 'שלט' },
   { href: '/files', icon: FolderOpen, label: 'קבצים' },
   { href: '/gallery', icon: Image, label: 'גלריה' },
-  { href: '/storage', icon: HardDrive, label: 'אחסון' },
 ];
 
 export default function BottomNav() {

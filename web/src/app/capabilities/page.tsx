@@ -195,6 +195,27 @@ const CATEGORIES: Category[] = [
       { text: 'מה ההתראות החכמות?', description: 'התראות שזוהו אוטומטית' },
     ],
   },
+  {
+    icon: <Sparkles size={20} />,
+    title: 'סיכום חכם',
+    description: 'סוללה + יומן + הודעות + אחסון + תזכורות במכה אחת',
+    color: 'text-cyan-400',
+    examples: [
+      { text: 'תן לי סיכום של המצב', description: 'סיכום בוקר מלא' },
+      { text: 'מה המצב היום?', description: 'סטטוס מהיר' },
+    ],
+  },
+  {
+    icon: <Smartphone size={20} />,
+    title: 'שלט רחוק',
+    description: 'שליטה בטלפון: WiFi, פנס, ווליום, בהירות, מדיה',
+    color: 'text-teal-400',
+    examples: [
+      { text: 'תדליק את הפנס', description: 'פנס' },
+      { text: 'תכבה WiFi', description: 'מתג WiFi' },
+      { text: 'תצלם מסך', description: 'צילום מסך' },
+    ],
+  },
 ];
 
 export default function CapabilitiesPage() {

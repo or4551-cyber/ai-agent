@@ -229,6 +229,10 @@ async function executeToolInternal(
       return `📂 נמחקו ${count} תיקיות ריקות.`;
     }
 
+    // Smart Briefing
+    case 'smart_briefing':
+      return termuxApi.smartBriefing();
+
     // QR Code Scanner
     case 'scan_qr_code':
       return termuxApi.scanQrCode(input.image_path as string | undefined);

@@ -262,6 +262,204 @@ app.delete('/api/conversations', authMiddleware, (_req, res) => {
   res.json({ success: true });
 });
 
+// ===== DEVICE CONTROL PANEL API =====
+
+function authQuery(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const token = (req.query.token as string) || req.headers.authorization?.replace('Bearer ', '');
+  if (token !== AUTH_TOKEN) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  next();
+}
+
+app.get('/api/device-stats', authQuery, async (_req, res) => {
+  const { execSync } = require('child_process');
+  const os = require('os');
+  const stats: Record<string, unknown> = {};
+
+  // Battery
+  try {
+    const raw = execSync('termux-battery-status 2>/dev/null', { timeout: 5000 }).toString();
+    const b = JSON.parse(raw);
+    stats.battery = { level: b.percentage ?? -1, charging: b.status === 'CHARGING', temperature: b.temperature };
+  } catch {
+    stats.battery = { level: -1, charging: false };
+  }
+
+  // Storage
+  try {
+    const homeDir = process.env.HOME || os.homedir();
+    const stat = fs.statfsSync ? fs.statfsSync(homeDir) : null;
+    if (stat) {
+      const totalMb = Math.round((stat.bsize * stat.blocks) / (1024 * 1024));
+      const freeMb = Math.round((stat.bsize * stat.bfree) / (1024 * 1024));
+      stats.storage = { totalMb, freeMb, usedMb: totalMb - freeMb };
+    } else {
+      stats.storage = { totalMb: 0, freeMb: 0, usedMb: 0 };
+    }
+  } catch {
+    stats.storage = { totalMb: 0, freeMb: 0, usedMb: 0 };
+  }
+
+  // Volume
+  try {
+    const raw = execSync('termux-volume 2>/dev/null', { timeout: 3000 }).toString();
+    const volumes = JSON.parse(raw);
+    const music = volumes.find((v: any) => v.stream === 'music');
+    stats.volume = music?.volume ?? 7;
+  } catch {
+    stats.volume = 7;
+  }
+
+  // Brightness
+  try {
+    const raw = execSync('termux-brightness 2>/dev/null', { timeout: 2000 }).toString();
+    stats.brightness = parseInt(raw.trim()) || 50;
+  } catch {
+    stats.brightness = 50;
+  }
+
+  // WiFi
+  try {
+    const raw = execSync('termux-wifi-connectioninfo 2>/dev/null', { timeout: 3000 }).toString();
+    const wifi = JSON.parse(raw);
+    stats.wifi = wifi.supplicant_state === 'COMPLETED' || wifi.ip !== '';
+  } catch {
+    stats.wifi = false;
+  }
+
+  stats.bluetooth = false;
+  stats.flashlight = false;
+
+  res.json(stats);
+});
+
+app.post('/api/device-action', authQuery, async (req, res) => {
+  const { execSync } = require('child_process');
+  const { action } = req.body;
+  const results: Record<string, string> = {};
+
+  try {
+    switch (action) {
+      case 'toggle_wifi':
+        execSync('termux-wifi-enable toggle 2>/dev/null || svc wifi enable 2>/dev/null', { timeout: 3000 });
+        results.message = 'WiFi toggled';
+        break;
+      case 'toggle_bluetooth':
+        execSync('am start -a android.bluetooth.adapter.action.REQUEST_ENABLE 2>/dev/null', { timeout: 3000 });
+        results.message = 'Bluetooth dialog opened';
+        break;
+      case 'toggle_flashlight':
+        execSync('termux-torch toggle 2>/dev/null', { timeout: 2000 });
+        results.message = 'Flashlight toggled';
+        break;
+      case 'vibrate':
+        execSync('termux-vibrate -d 300 2>/dev/null', { timeout: 2000 });
+        results.message = 'Vibrated';
+        break;
+      case 'volume_up':
+        execSync('input keyevent KEYCODE_VOLUME_UP 2>/dev/null', { timeout: 2000 });
+        results.message = 'Volume up';
+        break;
+      case 'volume_down':
+        execSync('input keyevent KEYCODE_VOLUME_DOWN 2>/dev/null', { timeout: 2000 });
+        results.message = 'Volume down';
+        break;
+      case 'brightness_up':
+        execSync('termux-brightness 200 2>/dev/null', { timeout: 2000 });
+        results.message = 'Brightness up';
+        break;
+      case 'brightness_down':
+        execSync('termux-brightness 50 2>/dev/null', { timeout: 2000 });
+        results.message = 'Brightness down';
+        break;
+      case 'media_play_pause':
+        execSync('input keyevent KEYCODE_MEDIA_PLAY_PAUSE 2>/dev/null', { timeout: 2000 });
+        results.message = 'Play/Pause';
+        break;
+      case 'media_next':
+        execSync('input keyevent KEYCODE_MEDIA_NEXT 2>/dev/null', { timeout: 2000 });
+        results.message = 'Next track';
+        break;
+      case 'media_previous':
+        execSync('input keyevent KEYCODE_MEDIA_PREVIOUS 2>/dev/null', { timeout: 2000 });
+        results.message = 'Previous track';
+        break;
+      case 'open_dialer':
+        execSync('am start -a android.intent.action.DIAL 2>/dev/null', { timeout: 3000 });
+        results.message = 'Dialer opened';
+        break;
+      case 'screenshot':
+        execSync('termux-screenshot /storage/emulated/0/Screenshots/ai-screenshot.png 2>/dev/null || screencap -p /storage/emulated/0/Screenshots/ai-screenshot.png 2>/dev/null', { timeout: 5000 });
+        results.message = 'Screenshot taken';
+        break;
+      case 'screenrecord':
+        execSync('termux-toast "הקלטה מתחילה..." 2>/dev/null', { timeout: 2000 });
+        results.message = 'Recording info sent';
+        break;
+      default:
+        results.message = `Unknown action: ${action}`;
+    }
+  } catch (err) {
+    results.message = `Error: ${(err as Error).message}`;
+  }
+
+  res.json(results);
+});
+
+// ===== SMART BRIEFING API =====
+
+app.get('/api/smart-briefing', authQuery, async (_req, res) => {
+  const { execSync } = require('child_process');
+  const briefing: Record<string, unknown> = {};
+
+  // Battery
+  try {
+    const raw = execSync('termux-battery-status 2>/dev/null', { timeout: 5000 }).toString();
+    const b = JSON.parse(raw);
+    briefing.battery = `${b.percentage}%${b.status === 'CHARGING' ? ' (טוען)' : ''}`;
+  } catch { briefing.battery = 'לא זמין'; }
+
+  // Calendar
+  try {
+    const { calendarList } = require('./tools/termux-api');
+    briefing.calendar = await calendarList(1);
+  } catch { briefing.calendar = 'לא זמין'; }
+
+  // WhatsApp
+  try {
+    const { whatsappMessages } = require('./tools/termux-api');
+    briefing.whatsapp = await whatsappMessages();
+  } catch { briefing.whatsapp = 'לא זמין'; }
+
+  // Storage
+  try {
+    const os = require('os');
+    const homeDir = process.env.HOME || os.homedir();
+    const stat = fs.statfsSync ? fs.statfsSync(homeDir) : null;
+    if (stat) {
+      const freeMb = Math.round((stat.bsize * stat.bfree) / (1024 * 1024));
+      briefing.storage = `${(freeMb / 1024).toFixed(1)}GB פנוי`;
+    }
+  } catch { briefing.storage = 'לא זמין'; }
+
+  // Reminders
+  try {
+    const upcoming = reminderService.list(false);
+    briefing.reminders = upcoming.length > 0
+      ? upcoming.map(r => `• ${r.text}`).join('\n')
+      : 'אין תזכורות פתוחות';
+  } catch { briefing.reminders = 'לא זמין'; }
+
+  // Time & greeting
+  const hour = new Date().getHours();
+  briefing.greeting = hour < 12 ? 'בוקר טוב! ☀️' : hour < 17 ? 'צהריים טובים! 🌤️' : hour < 21 ? 'ערב טוב! 🌆' : 'לילה טוב! 🌙';
+  briefing.time = new Date().toLocaleString('he-IL');
+
+  res.json(briefing);
+});
+
 // ===== DASHBOARD API =====
 
 app.get('/api/dashboard', authMiddleware, async (_req, res) => {

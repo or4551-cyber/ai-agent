@@ -603,6 +603,18 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== SMART BRIEFING =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'smart_briefing',
+      description: 'Get a smart daily briefing: battery, calendar events, WhatsApp messages, storage, reminders — all in one summary.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
   // ===== QR CODE SCANNER =====
   {
     dangerLevel: 'safe',
