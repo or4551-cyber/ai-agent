@@ -229,6 +229,18 @@ async function executeToolInternal(
       return `📂 נמחקו ${count} תיקיות ריקות.`;
     }
 
+    // QR Code Scanner
+    case 'scan_qr_code':
+      return termuxApi.scanQrCode(input.image_path as string | undefined);
+
+    // Media Control
+    case 'media_control':
+      return termuxApi.mediaControl(input.action as string);
+    case 'media_volume':
+      return termuxApi.mediaVolume(input.level as number | undefined, input.action as string | undefined);
+    case 'media_now_playing':
+      return termuxApi.mediaNowPlaying();
+
     // App Launcher
     case 'open_app':
       return termuxApi.openApp(input.app_name as string);

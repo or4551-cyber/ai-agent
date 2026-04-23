@@ -19,10 +19,16 @@ export class AgentWebSocket {
   private listeners: Map<string, Set<(event: WSEvent) => void>> = new Map();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _connected = false;
+  private _reconnectAttempts = 0;
+  private _maxReconnectAttempts = 20;
 
   constructor(url: string, token: string) {
     this.url = url;
     this.token = token;
+  }
+
+  get reconnectAttempts() {
+    return this._reconnectAttempts;
   }
 
   get connected() {
@@ -37,6 +43,7 @@ export class AgentWebSocket {
 
     this.ws.onopen = () => {
       this._connected = true;
+      this._reconnectAttempts = 0;
       this.emit('connection', { type: 'connection', payload: { status: 'connected' } });
     };
 
@@ -100,10 +107,24 @@ export class AgentWebSocket {
     this.listeners.get(event)?.forEach((cb) => cb(data));
   }
 
+  forceReconnect(): void {
+    this._reconnectAttempts = 0;
+    this.ws?.close();
+    this.ws = null;
+    this.connect();
+  }
+
   private scheduleReconnect(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      this.emit('connection', { type: 'connection', payload: { status: 'failed' } } as unknown as WSEvent);
+      return;
+    }
+    const delay = Math.min(1000 * Math.pow(1.5, this._reconnectAttempts), 30000);
+    this._reconnectAttempts++;
+    this.emit('connection', { type: 'connection', payload: { status: 'reconnecting', attempt: this._reconnectAttempts } } as unknown as WSEvent);
     this.reconnectTimer = setTimeout(() => {
       this.connect();
-    }, 3000);
+    }, delay);
   }
 }

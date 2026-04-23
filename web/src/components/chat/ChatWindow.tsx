@@ -39,6 +39,7 @@ export default function ChatWindow() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [typingStatus, setTypingStatus] = useState<'idle' | 'thinking' | 'typing' | 'tool'>('idle');
   const [connected, setConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting' | 'failed'>('disconnected');
   const [cost, setCost] = useState({ totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0 });
   const [conversationId, setConversationId] = useState<string>(() => `conv-${Date.now()}`);
   const [showHistory, setShowHistory] = useState(false);
@@ -60,7 +61,9 @@ export default function ChatWindow() {
     wsRef.current = ws;
 
     ws.on('connection', (event: WSEvent) => {
-      setConnected(event.payload.status === 'connected');
+      const status = event.payload.status as string;
+      setConnected(status === 'connected');
+      setConnectionStatus(status as any);
     });
 
     ws.on('text_delta', (event: WSEvent) => {
@@ -284,9 +287,18 @@ export default function ChatWindow() {
           <div>
             <h1 className="text-sm font-bold tracking-tight">AI Agent</h1>
             <div className="flex items-center gap-1.5 text-[11px]">
-              {connected ? (
+              {connectionStatus === 'connected' && (
                 <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft" /> <span className="text-emerald-400">מחובר</span></>
-              ) : (
+              )}
+              {connectionStatus === 'reconnecting' && (
+                <><span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> <span className="text-amber-400">מתחבר מחדש...</span></>
+              )}
+              {connectionStatus === 'failed' && (
+                <button onClick={() => wsRef.current?.forceReconnect()} className="flex items-center gap-1 text-red-400 hover:text-red-300">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-400" /> נכשל — לחץ לחיבור מחדש
+                </button>
+              )}
+              {connectionStatus === 'disconnected' && (
                 <><span className="w-1.5 h-1.5 rounded-full bg-red-400" /> <span className="text-red-400">מנותק</span></>
               )}
             </div>

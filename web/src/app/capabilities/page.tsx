@@ -6,7 +6,7 @@ import {
   Sparkles, FolderOpen, Camera, MessageSquare, Battery, Globe,
   Mail, GitBranch, Clock, Brain, HardDrive, Mic, Bell,
   Smartphone, Calendar, MessageCircle, ChevronDown, ChevronUp,
-  ArrowRight, Copy, Check,
+  ArrowRight, Copy, Check, Music, QrCode, Volume2,
 } from 'lucide-react';
 
 interface Category {
@@ -152,6 +152,28 @@ const CATEGORIES: Category[] = [
     examples: [
       { text: 'תסרוק את האחסון ותגיד לי מה אפשר למחוק', description: 'סריקה מלאה' },
       { text: 'תנקה את כל ה-cache', description: 'ניקוי מהיר' },
+    ],
+  },
+  {
+    icon: <Music size={20} />,
+    title: 'שליטה במדיה',
+    description: 'play/pause, שיר הבא/קודם, ווליום, מה מנגן',
+    color: 'text-indigo-400',
+    examples: [
+      { text: 'תעצור את המוזיקה', description: 'pause' },
+      { text: 'שיר הבא', description: 'next track' },
+      { text: 'תעלה ווליום', description: 'volume up' },
+      { text: 'מה מנגן עכשיו?', description: 'now playing' },
+    ],
+  },
+  {
+    icon: <QrCode size={20} />,
+    title: 'סריקת QR',
+    description: 'סריקת ברקודים ו-QR codes',
+    color: 'text-lime-400',
+    examples: [
+      { text: 'תסרוק QR code', description: 'צילום + סריקה' },
+      { text: 'תסרוק את הברקוד בתמונה הזו', description: 'סריקה מתמונה קיימת' },
     ],
   },
   {

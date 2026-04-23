@@ -603,6 +603,60 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== QR CODE SCANNER =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'scan_qr_code',
+      description: 'Scan a QR code or barcode. Takes a photo and decodes it. Optionally provide a path to an existing image.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          image_path: { type: 'string', description: 'Path to an existing image with QR code (optional — will take a photo if not provided)' },
+        },
+      },
+    },
+  },
+  // ===== MEDIA CONTROL =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'media_control',
+      description: 'Control media playback: play, pause, stop, next, previous, play_pause.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', description: 'Action: play, pause, stop, next, previous, play_pause', enum: ['play', 'pause', 'stop', 'next', 'previous', 'play_pause'] },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'media_volume',
+      description: 'Control or check the device volume. Set level (0-15), or action: up/down/mute. No args = show current volume.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          level: { type: 'number', description: 'Volume level 0-15' },
+          action: { type: 'string', description: 'up, down, or mute', enum: ['up', 'down', 'mute'] },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'media_now_playing',
+      description: 'Get info about what is currently playing (music, video, etc).',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+  },
   // ===== APP LAUNCHER =====
   {
     dangerLevel: 'moderate',

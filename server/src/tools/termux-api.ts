@@ -181,6 +181,154 @@ export async function getNotifications(): Promise<string> {
   }
 }
 
+// ===== QR CODE SCANNER =====
+
+export async function scanQrCode(imagePath?: string): Promise<string> {
+  try {
+    let photoPath = imagePath;
+
+    // Take photo if no image provided
+    if (!photoPath) {
+      photoPath = `/data/data/com.termux/files/home/.ai-agent/qr-scan-${Date.now()}.jpg`;
+      await runCommand(`termux-camera-photo -c 0 "${photoPath}"`, undefined, 10000);
+      // Verify
+      try {
+        const stat = await fs.stat(photoPath);
+        if (stat.size < 100) return 'לא הצלחתי לצלם. וודא שיש הרשאת מצלמה.';
+      } catch {
+        return 'לא הצלחתי לצלם. וודא ש-Termux:API מותקן.';
+      }
+    }
+
+    // Try zbarimg first (fast, reliable)
+    try {
+      const result = await runCommand(`zbarimg -q "${photoPath}" 2>/dev/null`, undefined, 5000);
+      if (result.trim()) {
+        const decoded = result.trim().split('\n').map(line => {
+          const [type, ...data] = line.split(':');
+          return `${type}: ${data.join(':')}`;
+        });
+        // Cleanup temp photo
+        if (!imagePath) await fs.unlink(photoPath).catch(() => {});
+        return `📱 QR Code נסרק!\n${decoded.join('\n')}`;
+      }
+    } catch {}
+
+    // Fallback: Python with pyzbar/PIL
+    try {
+      const pyScript = `
+import sys
+try:
+    from pyzbar.pyzbar import decode
+    from PIL import Image
+    img = Image.open("${photoPath}")
+    results = decode(img)
+    if results:
+        for r in results:
+            print(f"{r.type}: {r.data.decode()}")
+    else:
+        print("NO_QR_FOUND")
+except ImportError:
+    print("MISSING_DEPS")
+`;
+      const result = await runCommand(`python3 -c '${pyScript.replace(/'/g, "'\\''")}'`, undefined, 10000);
+      if (result.includes('MISSING_DEPS')) {
+        // Last resort: try termux-camera-barcode if available
+        const barcodeResult = await runCommand('termux-barcode-scan 2>/dev/null', undefined, 15000);
+        if (barcodeResult.trim()) return `📱 ברקוד נסרק!\n${barcodeResult.trim()}`;
+        return 'לא מותקנים כלי סריקת QR. התקן: pip install pyzbar Pillow או pkg install zbar';
+      }
+      if (result.includes('NO_QR_FOUND')) return 'לא נמצא QR code בתמונה.';
+      if (!imagePath) await fs.unlink(photoPath).catch(() => {});
+      return `📱 QR Code נסרק!\n${result.trim()}`;
+    } catch {}
+
+    return 'לא הצלחתי לסרוק QR. נסה להתקין zbar: pkg install zbar';
+  } catch (err) {
+    return `שגיאה: ${(err as Error).message}`;
+  }
+}
+
+// ===== MEDIA CONTROL =====
+
+export async function mediaControl(action: string): Promise<string> {
+  const commands: Record<string, { cmd: string; response: string }> = {
+    play: { cmd: 'termux-media-player play', response: '▶️ מנגן' },
+    pause: { cmd: 'termux-media-player pause', response: '⏸️ מושהה' },
+    stop: { cmd: 'termux-media-player stop', response: '⏹️ הופסק' },
+    next: { cmd: 'input keyevent KEYCODE_MEDIA_NEXT', response: '⏭️ שיר הבא' },
+    previous: { cmd: 'input keyevent KEYCODE_MEDIA_PREVIOUS', response: '⏮️ שיר קודם' },
+    play_pause: { cmd: 'input keyevent KEYCODE_MEDIA_PLAY_PAUSE', response: '⏯️ play/pause' },
+  };
+
+  const entry = commands[action.toLowerCase()];
+  if (!entry) return `פעולה לא מוכרת: "${action}". פעולות זמינות: ${Object.keys(commands).join(', ')}`;
+
+  try {
+    await runCommand(entry.cmd, undefined, 3000);
+    return entry.response;
+  } catch (err) {
+    return `שגיאה: ${(err as Error).message}`;
+  }
+}
+
+export async function mediaVolume(level?: number, action?: string): Promise<string> {
+  try {
+    if (action === 'up') {
+      await runCommand('input keyevent KEYCODE_VOLUME_UP', undefined, 2000);
+      return '🔊 ווליום +';
+    }
+    if (action === 'down') {
+      await runCommand('input keyevent KEYCODE_VOLUME_DOWN', undefined, 2000);
+      return '🔉 ווליום -';
+    }
+    if (action === 'mute') {
+      await runCommand('input keyevent KEYCODE_VOLUME_MUTE', undefined, 2000);
+      return '🔇 מושתק';
+    }
+    if (level !== undefined) {
+      const clamped = Math.max(0, Math.min(15, level));
+      await runCommand(`termux-volume music ${clamped}`, undefined, 2000);
+      return `🔊 ווליום הוגדר ל-${clamped}/15`;
+    }
+    // Get current volume
+    const raw = await runCommand('termux-volume', undefined, 3000);
+    try {
+      const volumes = JSON.parse(raw);
+      const music = volumes.find((v: any) => v.stream === 'music');
+      return music ? `🔊 ווליום נוכחי: ${music.volume}/${music.max_volume}` : raw;
+    } catch {
+      return raw;
+    }
+  } catch (err) {
+    return `שגיאה: ${(err as Error).message}`;
+  }
+}
+
+export async function mediaNowPlaying(): Promise<string> {
+  try {
+    // Try to get info from termux-media-player
+    const raw = await runCommand('termux-media-player info 2>/dev/null', undefined, 3000);
+    if (raw.trim() && !raw.includes('No track')) {
+      return `🎵 מנגן עכשיו:\n${raw.trim()}`;
+    }
+
+    // Fallback: check music-related notifications
+    const notifRaw = await runCommand('termux-notification-list 2>/dev/null', undefined, 5000);
+    const notifs = JSON.parse(notifRaw);
+    const musicNotif = notifs.find((n: any) =>
+      ['com.spotify.music', 'com.google.android.apps.youtube.music', 'com.google.android.music',
+       'com.apple.android.music', 'deezer.android.app'].includes(n.packageName)
+    );
+    if (musicNotif) {
+      return `🎵 ${musicNotif.title || ''} — ${musicNotif.content || musicNotif.text || ''}`;
+    }
+    return 'לא מנגן כלום כרגע.';
+  } catch {
+    return 'לא הצלחתי לקבל מידע על מה שמנגן.';
+  }
+}
+
 // ===== APP LAUNCHER =====
 
 const APP_ALIASES: Record<string, string> = {
