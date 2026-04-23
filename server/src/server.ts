@@ -228,8 +228,8 @@ app.get('/api/files/read', authMiddleware, async (req, res) => {
     const filePath = req.query.path as string;
     if (!filePath) { res.status(400).json({ error: 'path required' }); return; }
     const stat = await fs.promises.stat(filePath);
-    if (stat.size > 2 * 1024 * 1024) {
-      res.status(400).json({ error: 'File too large (>2MB)' });
+    if (stat.size > 10 * 1024 * 1024) {
+      res.status(400).json({ error: 'File too large (>10MB)' });
       return;
     }
     const content = await fs.promises.readFile(filePath, 'utf-8');
@@ -273,8 +273,8 @@ const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bm
 
 app.get('/api/gallery', authMiddleware, async (req, res) => {
   try {
-    const galleryPath = (req.query.path as string) || '/storage/emulated/0/DCIM';
-    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const customPath = req.query.path as string;
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
 
     const images: { name: string; path: string; size: number; modified: string }[] = [];
 
@@ -302,8 +302,24 @@ app.get('/api/gallery', authMiddleware, async (req, res) => {
       } catch { /* skip unreadable dirs */ }
     }
 
-    await scanDir(galleryPath, 0);
+    if (customPath) {
+      await scanDir(customPath, 0);
+    } else {
+      // Scan all common image folders
+      const baseDirs = [
+        '/storage/emulated/0/DCIM',
+        '/storage/emulated/0/Pictures',
+        '/storage/emulated/0/Screenshots',
+        '/storage/emulated/0/Download',
+      ];
+      for (const dir of baseDirs) {
+        if (images.length >= limit) break;
+        await scanDir(dir, 0);
+      }
+    }
+
     images.sort((a, b) => b.modified.localeCompare(a.modified));
+    const galleryPath = customPath || '/storage/emulated/0';
     res.json({ path: galleryPath, count: images.length, images });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });

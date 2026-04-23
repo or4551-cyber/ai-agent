@@ -31,13 +31,32 @@ export default function FileExplorer() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editingFile, setEditingFile] = useState<{ path: string; content: string; original: string } | null>(null);
+  const [viewingImage, setViewingImage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
+
+  const IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'];
+  const VIDEO_EXTS = ['mp4', 'mkv', 'avi', 'mov', 'webm'];
+  const BINARY_EXTS = [...IMAGE_EXTS, ...VIDEO_EXTS, 'pdf', 'zip', 'tar', 'gz', 'rar', '7z', 'apk', 'so', 'db'];
+  const isImageFile = (name: string) => {
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+    return IMAGE_EXTS.includes(ext);
+  };
+  const isBinaryFile = (name: string) => {
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+    return BINARY_EXTS.includes(ext);
+  };
+  const getImgSrc = (filePath: string) => {
+    const token = process.env.NEXT_PUBLIC_AUTH_TOKEN || 'dev-token';
+    const base = typeof window !== 'undefined' ? window.location.origin : '';
+    return `${base}/api/gallery/image?path=${encodeURIComponent(filePath)}&token=${token}`;
+  };
 
   const loadDir = useCallback(async (dirPath?: string) => {
     setLoading(true);
     setError('');
     setEditingFile(null);
+    setViewingImage(null);
     try {
       const data = await listFiles(dirPath);
       setListing(data);
@@ -55,6 +74,16 @@ export default function FileExplorer() {
   const openFile = async (item: FileItem) => {
     if (item.isDirectory) {
       loadDir(item.path);
+      return;
+    }
+    // Show images as images, not text
+    if (isImageFile(item.name)) {
+      setViewingImage(item.path);
+      return;
+    }
+    // Don't try to open binary files as text
+    if (isBinaryFile(item.name)) {
+      setError(`Cannot open ${item.name} — binary file`);
       return;
     }
     setFileLoading(true);
@@ -82,6 +111,30 @@ export default function FileExplorer() {
   };
 
   const hasChanges = editingFile ? editingFile.content !== editingFile.original : false;
+
+  // ===== IMAGE VIEWER =====
+  if (viewingImage) {
+    const fileName = viewingImage.split(/[\\/]/).pop() || '';
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border)] bg-[var(--card)]">
+          <div className="flex items-center gap-2 min-w-0">
+            <button onClick={() => setViewingImage(null)} className="p-1.5 rounded hover:bg-[var(--muted)] text-[var(--muted-foreground)]">
+              <X size={18} />
+            </button>
+            <span className="text-sm font-medium truncate">{fileName}</span>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center bg-black p-4 overflow-auto">
+          <img
+            src={getImgSrc(viewingImage)}
+            alt={fileName}
+            className="max-w-full max-h-full object-contain rounded"
+          />
+        </div>
+      </div>
+    );
+  }
 
   // ===== CODE EDITOR VIEW =====
   if (editingFile) {
