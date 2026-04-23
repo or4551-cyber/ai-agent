@@ -82,6 +82,37 @@ function getInputSummary(name: string, input: Record<string, unknown>): string {
   return '';
 }
 
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'];
+
+function extractImagePath(output: string): string | null {
+  // Match paths like /storage/emulated/0/DCIM/photo.jpg
+  const match = output.match(/(\/\S+\.(?:jpg|jpeg|png|gif|webp|bmp|heic))/i);
+  return match ? match[1] : null;
+}
+
+function renderImagePreview(toolName: string, output: string) {
+  const imageTools = ['take_photo', 'gallery_list'];
+  const imgPath = extractImagePath(output);
+  if (!imgPath) return null;
+
+  const token = typeof window !== 'undefined'
+    ? (process.env.NEXT_PUBLIC_AUTH_TOKEN || 'dev-token')
+    : 'dev-token';
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
+  const src = `${base}/api/gallery/image?path=${encodeURIComponent(imgPath)}&token=${token}`;
+
+  return (
+    <div className="mt-2">
+      <img
+        src={src}
+        alt="Photo"
+        className="max-w-full max-h-64 rounded-lg object-contain"
+        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+      />
+    </div>
+  );
+}
+
 export default function ToolCallCard({ id, name, input, output, status, onApprove }: ToolCallCardProps) {
   const icon = TOOL_ICONS[name] || <Terminal size={16} />;
   const label = getToolLabel(name);
@@ -111,8 +142,9 @@ export default function ToolCallCard({ id, name, input, output, status, onApprov
       )}
 
       {output && (
-        <div className="mt-2 text-xs text-[var(--muted-foreground)] bg-black/20 rounded p-2 max-h-32 overflow-auto font-mono whitespace-pre-wrap">
+        <div className="mt-2 text-xs text-[var(--muted-foreground)] bg-black/20 rounded p-2 max-h-48 overflow-auto font-mono whitespace-pre-wrap">
           {output}
+          {renderImagePreview(name, output)}
         </div>
       )}
 
