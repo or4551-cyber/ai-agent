@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AgentWebSocket, WSEvent } from '@/lib/websocket';
 import MessageBubble from './MessageBubble';
+import TypingIndicator from './TypingIndicator';
 import ChatInput, { ImageAttachment } from './ChatInput';
 import { Wifi, WifiOff, Trash2, DollarSign, History, Plus } from 'lucide-react';
 import {
@@ -35,6 +36,7 @@ const AUTH_TOKEN = process.env.NEXT_PUBLIC_AUTH_TOKEN || 'dev-token';
 export default function ChatWindow() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [typingStatus, setTypingStatus] = useState<'idle' | 'thinking' | 'typing' | 'tool'>('idle');
   const [connected, setConnected] = useState(false);
   const [cost, setCost] = useState({ totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0 });
   const [conversationId, setConversationId] = useState<string>(() => `conv-${Date.now()}`);
@@ -62,6 +64,7 @@ export default function ChatWindow() {
 
     ws.on('text_delta', (event: WSEvent) => {
       const text = event.payload.text as string;
+      setTypingStatus('typing');
       setMessages((prev) => {
         const updated = [...prev];
         const last = updated[updated.length - 1];
@@ -74,6 +77,7 @@ export default function ChatWindow() {
     });
 
     ws.on('tool_call_start', (event: WSEvent) => {
+      setTypingStatus('tool');
       const { id, name, input, dangerLevel } = event.payload;
       const toolCall: ToolCall = {
         id: id as string,
@@ -128,6 +132,7 @@ export default function ChatWindow() {
 
     ws.on('message_done', () => {
       setIsStreaming(false);
+      setTypingStatus('idle');
       // Auto-save conversation
       setMessages((current) => {
         if (current.length > 0) {
@@ -165,6 +170,7 @@ export default function ChatWindow() {
         return updated;
       });
       setIsStreaming(false);
+      setTypingStatus('idle');
     });
 
     ws.connect();
@@ -193,6 +199,7 @@ export default function ChatWindow() {
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setIsStreaming(true);
+    setTypingStatus('thinking');
 
     if (images && images.length > 0) {
       wsRef.current?.send('chat', {
@@ -300,32 +307,54 @@ export default function ChatWindow() {
 
       {/* History Panel */}
       {showHistory && (
-        <div className="absolute inset-0 z-40 bg-[var(--background)] flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-            <h2 className="text-sm font-semibold">Conversation History</h2>
-            <button onClick={() => setShowHistory(false)} className="p-2 rounded-lg hover:bg-[var(--muted)] text-[var(--muted-foreground)]">
-              <Trash2 size={16} />
+        <div className="absolute inset-0 z-40 bg-[var(--background)] flex flex-col animate-fade-in">
+          <div className="glass flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+            <h2 className="text-sm font-bold tracking-tight">היסטוריית שיחות</h2>
+            <button onClick={() => setShowHistory(false)} className="p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]">
+              ✕
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
             {conversations.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-sm text-[var(--muted-foreground)]">
-                No saved conversations
+              <div className="flex flex-col items-center justify-center h-full text-[var(--muted-foreground)] animate-fade-in">
+                <div className="w-16 h-16 rounded-2xl bg-[var(--muted)] flex items-center justify-center mb-4">
+                  <History size={28} className="opacity-40" />
+                </div>
+                <div className="text-sm font-medium">אין שיחות שמורות</div>
+                <div className="text-xs mt-1">שיחות חדשות יופיעו כאן</div>
               </div>
             ) : (
-              <div className="divide-y divide-[var(--border)]">
-                {conversations.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => loadConversation(c.id)}
-                    className="w-full text-left px-4 py-3 hover:bg-[var(--muted)] transition-colors"
-                  >
-                    <div className="text-sm font-medium truncate">{c.title}</div>
-                    <div className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                      {c.messages.length} messages &middot; {new Date(c.updatedAt).toLocaleDateString('he-IL')}
+              <div className="p-2 space-y-1">
+                {conversations.map((c) => {
+                  const now = Date.now();
+                  const diff = now - new Date(c.updatedAt).getTime();
+                  const mins = Math.floor(diff / 60000);
+                  const hours = Math.floor(mins / 60);
+                  const days = Math.floor(hours / 24);
+                  const relTime = mins < 1 ? 'עכשיו' : mins < 60 ? `לפני ${mins} דק'` : hours < 24 ? `לפני ${hours} שע'` : days < 7 ? `לפני ${days} ימים` : new Date(c.updatedAt).toLocaleDateString('he-IL');
+                  const preview = c.messages.find(m => m.role === 'user')?.content?.slice(0, 60) || '';
+
+                  return (
+                    <div key={c.id} className="flex items-center gap-2 group">
+                      <button
+                        onClick={() => loadConversation(c.id)}
+                        className="flex-1 text-right px-3 py-2.5 rounded-xl hover:bg-[var(--muted)] transition-all"
+                      >
+                        <div className="text-sm font-medium truncate">{c.title}</div>
+                        {preview && <div className="text-[11px] text-[var(--muted-foreground)] truncate mt-0.5">{preview}</div>}
+                        <div className="text-[10px] text-[var(--muted-foreground)] mt-0.5">
+                          {c.messages.length} הודעות · {relTime}
+                        </div>
+                      </button>
+                      <button
+                        onClick={() => { deleteConversation(c.id); setConversations(listConversations()); }}
+                        className="p-2 rounded-lg text-[var(--muted-foreground)] hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -375,6 +404,7 @@ export default function ChatWindow() {
             onApprove={handleApprove}
           />
         ))}
+        {typingStatus === 'thinking' && <TypingIndicator label="חושב..." />}
         <div ref={messagesEndRef} />
       </div>
 

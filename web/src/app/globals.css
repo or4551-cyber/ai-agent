@@ -87,6 +87,11 @@ button:active {
   50% { opacity: 0.6; }
 }
 
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-6px); }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.3s ease-out;
 }

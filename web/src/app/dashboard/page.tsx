@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   getBriefing, getSuggestions, triggerDigest, Suggestion,
   getReminders, completeReminder, addReminder, Reminder,
@@ -9,7 +9,8 @@ import {
 import {
   Battery, BatteryCharging, Loader2, MessageSquare,
   Lightbulb, Sparkles, Eye, CheckCircle2, Circle,
-  Plus, Bell, Cloud, Cpu, ChevronRight
+  Plus, Bell, Cloud, Cpu, ChevronRight, RefreshCw,
+  Camera, Search, FolderOpen
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -19,11 +20,14 @@ export default function DashboardPage() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [observerStatus, setObserverStatus] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [digestLoading, setDigestLoading] = useState(false);
   const [newReminder, setNewReminder] = useState('');
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     try {
       const [b, r, s, obs] = await Promise.all([
         getBriefing().catch(() => null),
@@ -35,10 +39,14 @@ export default function DashboardPage() {
       setReminders(r.reminders);
       setSuggestions(s.suggestions);
       setObserverStatus(obs);
-    } catch {} finally { setLoading(false); }
+    } catch {} finally { setLoading(false); setRefreshing(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    intervalRef.current = setInterval(() => load(true), 30000);
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, []);
 
   const handleAddReminder = async () => {
     if (!newReminder.trim()) return;
@@ -71,46 +79,79 @@ export default function DashboardPage() {
   const unread = (briefing?.unreadNotifications as number) || 0;
   const tip = (briefing?.tip as string) || '';
 
+  const batteryColor = battery
+    ? battery.percentage > 50 ? 'bg-emerald-400' : battery.percentage > 20 ? 'bg-amber-400' : 'bg-red-400'
+    : 'bg-gray-400';
+
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Greeting Header */}
-      <div className="px-5 pt-6 pb-4 bg-gradient-to-b from-[var(--primary)]/10 to-transparent">
-        <div className="text-2xl font-bold mb-1">{greeting}</div>
-        <div className="text-sm text-[var(--muted-foreground)]">{date} &middot; {time}</div>
+      <div className="px-5 pt-6 pb-4 bg-gradient-to-b from-[var(--primary)]/10 to-transparent relative">
+        <button
+          onClick={() => load(true)}
+          className="absolute top-5 left-4 p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
+        >
+          <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+        </button>
+        <div className="text-3xl font-bold mb-0.5 tracking-tight">{time}</div>
+        <div className="text-sm text-[var(--muted-foreground)]">{greeting} &middot; {date}</div>
       </div>
 
-      {/* Status Pills */}
-      <div className="flex gap-2 px-4 pb-3 overflow-x-auto">
+      {/* Status Cards */}
+      <div className="grid grid-cols-2 gap-2 px-4 pb-4">
+        {/* Battery */}
         {battery && (
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium shrink-0 ${
-            battery.percentage < 20 ? 'bg-red-500/10 text-red-400' : 'bg-green-500/10 text-green-400'
-          }`}>
-            {battery.status === 'CHARGING' ? <BatteryCharging size={14} /> : <Battery size={14} />}
-            {battery.percentage}%
+          <div className="p-3 rounded-2xl bg-[var(--card)] border border-[var(--border)]">
+            <div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] mb-2">
+              {battery.status === 'CHARGING' ? <BatteryCharging size={13} /> : <Battery size={13} />}
+              סוללה
+            </div>
+            <div className="text-xl font-bold mb-1.5">{battery.percentage}%</div>
+            <div className="w-full h-1.5 rounded-full bg-[var(--muted)] overflow-hidden">
+              <div className={`h-full rounded-full transition-all ${batteryColor}`} style={{ width: `${battery.percentage}%` }} />
+            </div>
+            {battery.status === 'CHARGING' && <div className="text-[10px] text-emerald-400 mt-1">בטעינה</div>}
           </div>
         )}
-        {weather && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-blue-500/10 text-blue-400 text-xs font-medium shrink-0">
-            <Cloud size={14} /> {weather}
+
+        {/* Memory */}
+        <div className="p-3 rounded-2xl bg-[var(--card)] border border-[var(--border)]">
+          <div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] mb-2">
+            <Cpu size={13} /> זיכרון
           </div>
-        )}
-        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-purple-500/10 text-purple-400 text-xs font-medium shrink-0">
-          <Cpu size={14} /> RAM {memory}%
+          <div className="text-xl font-bold mb-1.5">{memory}%</div>
+          <div className="w-full h-1.5 rounded-full bg-[var(--muted)] overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${memory > 85 ? 'bg-red-400' : memory > 60 ? 'bg-amber-400' : 'bg-blue-400'}`} style={{ width: `${memory}%` }} />
+          </div>
         </div>
-        {unread > 0 && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-500/10 text-orange-400 text-xs font-medium shrink-0">
-            <Bell size={14} /> {unread} unread
+
+        {/* Weather */}
+        {weather && (
+          <div className="p-3 rounded-2xl bg-[var(--card)] border border-[var(--border)]">
+            <div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] mb-2">
+              <Cloud size={13} /> מזג אוויר
+            </div>
+            <div className="text-sm font-bold">{weather}</div>
           </div>
         )}
+
+        {/* Notifications */}
+        <div className="p-3 rounded-2xl bg-[var(--card)] border border-[var(--border)]">
+          <div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] mb-2">
+            <Bell size={13} /> התראות
+          </div>
+          <div className="text-xl font-bold">{unread}</div>
+          <div className="text-[10px] text-[var(--muted-foreground)]">{unread > 0 ? 'לא נקראו' : 'הכל נקרא'}</div>
+        </div>
       </div>
 
       {/* Reminders */}
       <div className="px-4 pb-4">
         <h2 className="text-xs font-semibold text-[var(--muted-foreground)] mb-2 uppercase tracking-wider flex items-center gap-1.5">
-          <CheckCircle2 size={13} /> Reminders
+          <CheckCircle2 size={13} /> תזכורות
         </h2>
         {reminders.length === 0 ? (
-          <div className="text-xs text-[var(--muted-foreground)] mb-2">No active reminders</div>
+          <div className="text-xs text-[var(--muted-foreground)] mb-2">אין תזכורות פעילות</div>
         ) : (
           <div className="space-y-1.5 mb-2">
             {reminders.slice(0, 5).map((r) => (
@@ -131,7 +172,8 @@ export default function DashboardPage() {
             value={newReminder}
             onChange={(e) => setNewReminder(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleAddReminder()}
-            placeholder="Add reminder..."
+            placeholder="הוסף תזכורת..."
+            dir="auto"
             className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-xs focus:outline-none focus:border-[var(--primary)]"
           />
           <button
@@ -148,7 +190,7 @@ export default function DashboardPage() {
       <div className="px-4 pb-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider flex items-center gap-1.5">
-            <Lightbulb size={13} /> AI Insights
+            <Lightbulb size={13} /> תובנות AI
           </h2>
           <div className="flex items-center gap-2">
             {observerStatus && (
@@ -166,13 +208,13 @@ export default function DashboardPage() {
               className="text-[10px] text-[var(--primary)] hover:underline flex items-center gap-0.5 disabled:opacity-50"
             >
               {digestLoading ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
-              Generate
+              צור
             </button>
           </div>
         </div>
         {suggestions.length === 0 ? (
           <div className="rounded-xl border border-dashed border-[var(--border)] p-3 text-center text-[10px] text-[var(--muted-foreground)]">
-            Observer running. Insights appear at 21:00 or tap Generate.
+            הצופה רץ ברקע. תובנות מופיעות ב-21:00 או לחץ צור.
           </div>
         ) : (
           <div className="space-y-1.5">
@@ -192,24 +234,26 @@ export default function DashboardPage() {
       {/* Tip of the day */}
       {tip && (
         <div className="mx-4 mb-4 px-4 py-3 rounded-xl bg-[var(--primary)]/5 border border-[var(--primary)]/20">
-          <div className="text-[10px] text-[var(--primary)] font-semibold mb-0.5 uppercase">Tip</div>
+          <div className="text-[10px] text-[var(--primary)] font-semibold mb-0.5">💡 טיפ</div>
           <div className="text-xs">{tip}</div>
         </div>
       )}
 
       {/* Quick Actions */}
       <div className="px-4 pb-6">
-        <h2 className="text-xs font-semibold text-[var(--muted-foreground)] mb-2 uppercase tracking-wider">Quick</h2>
-        <div className="grid grid-cols-2 gap-2">
-          <Link href="/" className="flex items-center gap-2 px-3 py-3 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] transition-colors">
-            <MessageSquare size={18} className="text-[var(--primary)]" />
-            <span className="text-xs font-medium">Chat</span>
-            <ChevronRight size={14} className="ml-auto text-[var(--muted-foreground)]" />
+        <h2 className="text-xs font-semibold text-[var(--muted-foreground)] mb-2 tracking-wider">פעולות מהירות</h2>
+        <div className="grid grid-cols-3 gap-2">
+          <Link href="/" className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
+            <MessageSquare size={20} className="text-[var(--primary)]" />
+            <span className="text-[11px] font-medium">צ'אט</span>
           </Link>
-          <Link href="/files" className="flex items-center gap-2 px-3 py-3 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] transition-colors">
-            <Cpu size={18} className="text-purple-400" />
-            <span className="text-xs font-medium">Files</span>
-            <ChevronRight size={14} className="ml-auto text-[var(--muted-foreground)]" />
+          <Link href="/files" className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
+            <FolderOpen size={20} className="text-purple-400" />
+            <span className="text-[11px] font-medium">קבצים</span>
+          </Link>
+          <Link href="/gallery" className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
+            <Camera size={20} className="text-emerald-400" />
+            <span className="text-[11px] font-medium">גלריה</span>
           </Link>
         </div>
       </div>
