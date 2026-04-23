@@ -112,7 +112,7 @@ export default function ChatInput({ onSend, onAbort, disabled, isStreaming }: Ch
   };
 
   return (
-    <div className="glass border-t border-[var(--border)] px-3 py-3 pb-[env(safe-area-inset-bottom)]">
+    <div className="glass border-t border-[var(--border)] px-3 py-3 pb-[env(safe-area-inset-bottom)] shrink-0">
       {/* Image previews */}
       {images.length > 0 && (
         <div className="flex gap-2 mb-2.5 max-w-3xl mx-auto overflow-x-auto pb-1">

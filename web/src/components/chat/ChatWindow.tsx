@@ -277,7 +277,7 @@ export default function ChatWindow() {
   };
 
   return (
-    <div className="flex flex-col h-full relative">
+    <div className="flex flex-col flex-1 min-h-0 relative">
       {/* Header */}
       <div className="glass flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">
