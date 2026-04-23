@@ -128,8 +128,23 @@ export async function getLocation(): Promise<string> {
 
 export async function takePhoto(cameraId = 0, savePath?: string): Promise<string> {
   const outputPath = savePath || `/storage/emulated/0/DCIM/ai-photo-${Date.now()}.jpg`;
-  await runCommand(`termux-camera-photo -c ${cameraId} "${outputPath}"`, undefined, 10000);
-  return `Photo saved to: ${outputPath}`;
+  // Ensure directory exists
+  const dir = path.dirname(outputPath);
+  await fs.mkdir(dir, { recursive: true });
+  
+  await runCommand(`termux-camera-photo -c ${cameraId} "${outputPath}"`, undefined, 15000);
+  
+  // Verify photo was actually created
+  try {
+    const stat = await fs.stat(outputPath);
+    if (stat.size < 100) {
+      return `Error: Photo file created but seems empty (${stat.size} bytes). Camera may not have permissions. Try: termux-setup-storage`;
+    }
+    const sizeMB = (stat.size / (1024 * 1024)).toFixed(1);
+    return `Photo saved to: ${outputPath} (${sizeMB}MB). The user can view it in the Gallery tab.`;
+  } catch {
+    return `Error: Photo was not saved. Make sure Termux:API is installed and camera permissions are granted. Run: termux-setup-storage`;
+  }
 }
 
 // ===== CLIPBOARD =====

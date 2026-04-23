@@ -319,12 +319,20 @@ app.get('/api/gallery/image', (req, res, next) => {
   try {
     const filePath = req.query.path as string;
     if (!filePath) { res.status(400).json({ error: 'path required' }); return; }
+    
+    // Check file exists and get size
+    const stat = await fs.promises.stat(filePath);
+    
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes: Record<string, string> = {
       '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
       '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+      '.heic': 'image/heic', '.heif': 'image/heif',
     };
     res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.setHeader('Content-Length', stat.size);
+    
     const stream = fs.createReadStream(filePath);
     stream.pipe(res);
   } catch (err) {
