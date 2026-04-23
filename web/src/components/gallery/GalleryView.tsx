@@ -99,12 +99,12 @@ export default function GalleryView() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] bg-[var(--card)]">
-        <h1 className="text-sm font-semibold flex items-center gap-2">
-          <ImageIcon size={18} /> Gallery
+      <div className="glass flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+        <h1 className="text-sm font-bold flex items-center gap-2 tracking-tight">
+          <ImageIcon size={18} className="text-[var(--primary)]" /> גלריה
         </h1>
-        <span className="text-xs text-[var(--muted-foreground)]">
-          {images.length} images
+        <span className="text-xs text-[var(--muted-foreground)] font-medium">
+          {images.length} תמונות
         </span>
       </div>
 
@@ -145,14 +145,14 @@ export default function GalleryView() {
                 <Calendar size={14} />
                 {date}
               </div>
-              <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-1">
+              <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-1.5">
                 {imgs.map((img) => {
                   const globalIdx = images.indexOf(img);
                   return (
                     <button
                       key={img.path}
                       onClick={() => setSelectedIndex(globalIdx)}
-                      className="aspect-square rounded-lg overflow-hidden bg-[var(--muted)] hover:opacity-80 transition-opacity"
+                      className="aspect-square rounded-xl overflow-hidden bg-[var(--muted)] hover:opacity-80 active:scale-95 transition-all"
                     >
                       <img
                         src={getImageUrl(img.path)}

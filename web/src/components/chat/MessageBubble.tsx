@@ -50,17 +50,17 @@ export default function MessageBubble({ role, content, toolCalls, onApprove }: M
   const isUser = role === 'user';
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-3 animate-fade-in`}>
       <div
         className={`max-w-[85%] md:max-w-[75%] rounded-2xl px-4 py-3 ${
           isUser
-            ? 'bg-[var(--primary)] text-white rounded-br-md'
-            : 'bg-[var(--card)] border border-[var(--border)] rounded-bl-md'
+            ? 'bg-gradient-to-br from-[var(--primary)] to-indigo-600 text-white rounded-br-sm shadow-lg shadow-[var(--primary)]/10'
+            : 'bg-[var(--card)] border border-[var(--border)] rounded-bl-sm'
         }`}
       >
         {/* Tool call cards (before text for assistant) */}
         {!isUser && toolCalls && toolCalls.length > 0 && (
-          <div className="mb-2">
+          <div className="mb-2 space-y-1.5">
             {toolCalls.map((tc) => (
               <ToolCallCard
                 key={tc.id}
@@ -77,7 +77,7 @@ export default function MessageBubble({ role, content, toolCalls, onApprove }: M
 
         {/* Message text */}
         {content && (
-          <div className="text-sm leading-relaxed">
+          <div className={`text-[14px] leading-[1.65] ${isUser ? '' : 'text-[var(--foreground)]'}`}>
             {parseContent(content)}
           </div>
         )}

@@ -175,7 +175,7 @@ export default function FileExplorer() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--border)] bg-[var(--card)]">
+      <div className="glass flex items-center gap-2 px-4 py-3 border-b border-[var(--border)]">
         <button
           onClick={() => listing?.parent && loadDir(listing.parent)}
           disabled={!listing?.parent || listing.path === listing.parent}

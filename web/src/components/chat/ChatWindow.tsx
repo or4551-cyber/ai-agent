@@ -258,39 +258,39 @@ export default function ChatWindow() {
   return (
     <div className="flex flex-col h-full relative">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] bg-[var(--card)]">
+      <div className="glass flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-[var(--primary)] flex items-center justify-center text-white text-sm font-bold">
+          <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-[var(--primary)] to-purple-600 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-[var(--primary)]/20">
             AI
           </div>
           <div>
-            <h1 className="text-sm font-semibold">AI Agent</h1>
-            <div className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+            <h1 className="text-sm font-bold tracking-tight">AI Agent</h1>
+            <div className="flex items-center gap-1.5 text-[11px]">
               {connected ? (
-                <><Wifi size={12} className="text-green-400" /> Connected</>
+                <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft" /> <span className="text-emerald-400">מחובר</span></>
               ) : (
-                <><WifiOff size={12} className="text-red-400" /> Disconnected</>
+                <><span className="w-1.5 h-1.5 rounded-full bg-red-400" /> <span className="text-red-400">מנותק</span></>
               )}
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {cost.totalCost > 0 && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-[var(--muted)] text-xs text-[var(--muted-foreground)]" title={`In: ${cost.totalInputTokens.toLocaleString()} | Out: ${cost.totalOutputTokens.toLocaleString()}`}>
-              <DollarSign size={12} />
-              <span>${cost.totalCost.toFixed(4)}</span>
+            <div className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[var(--muted)] text-[11px] text-[var(--muted-foreground)] font-mono" title={`In: ${cost.totalInputTokens.toLocaleString()} | Out: ${cost.totalOutputTokens.toLocaleString()}`}>
+              <DollarSign size={11} />
+              {cost.totalCost.toFixed(4)}
             </div>
           )}
           <button
             onClick={toggleHistory}
-            className="p-2 rounded-lg hover:bg-[var(--muted)] transition-colors text-[var(--muted-foreground)]"
+            className="p-2.5 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
             title="History"
           >
             <History size={18} />
           </button>
           <button
             onClick={newConversation}
-            className="p-2 rounded-lg hover:bg-[var(--muted)] transition-colors text-[var(--muted-foreground)]"
+            className="p-2.5 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
             title="New chat"
           >
             <Plus size={18} />
@@ -335,15 +335,15 @@ export default function ChatWindow() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-center text-[var(--muted-foreground)]">
-            <div className="w-16 h-16 rounded-full bg-[var(--primary)]/10 flex items-center justify-center mb-4">
-              <span className="text-3xl">🤖</span>
+          <div className="flex flex-col items-center justify-center h-full text-center animate-fade-in">
+            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[var(--primary)] to-purple-600 flex items-center justify-center mb-5 shadow-2xl shadow-[var(--primary)]/30">
+              <span className="text-4xl">🤖</span>
             </div>
-            <h2 className="text-lg font-semibold text-[var(--foreground)] mb-2">AI Agent</h2>
-            <p className="text-sm max-w-sm mb-6">
-              אני יכול לשלוט במכשיר שלך — לערוך קבצים, להריץ פקודות, לארגן תמונות, לשלוח הודעות ועוד.
+            <h2 className="text-xl font-bold text-[var(--foreground)] mb-1.5">היי, מה נעשה?</h2>
+            <p className="text-sm text-[var(--muted-foreground)] max-w-[280px] mb-8 leading-relaxed">
+              אני הסוכן שלך — שליטה מלאה על המכשיר, קבצים, מצלמה, הודעות ועוד.
             </p>
-            <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
+            <div className="grid grid-cols-2 gap-2.5 w-full max-w-xs">
               {[
                 { icon: '🔋', label: 'סוללה', msg: 'כמה סוללה נשארה?' },
                 { icon: '📍', label: 'מיקום', msg: 'איפה אני נמצא?' },
@@ -351,14 +351,15 @@ export default function ChatWindow() {
                 { icon: '🔔', label: 'התראות', msg: 'מה ההתראות האחרונות?' },
                 { icon: '🌤️', label: 'מזג אוויר', msg: 'מה מזג האוויר היום?' },
                 { icon: '📸', label: 'צלם תמונה', msg: 'תצלם תמונה' },
-              ].map((shortcut) => (
+              ].map((shortcut, i) => (
                 <button
                   key={shortcut.label}
                   onClick={() => handleSend(shortcut.msg)}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] transition-colors text-sm text-left"
+                  className="flex items-center gap-2.5 px-3.5 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] hover:border-[var(--muted-foreground)]/20 transition-all text-sm text-right animate-slide-up"
+                  style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'backwards' }}
                 >
-                  <span className="text-lg">{shortcut.icon}</span>
-                  <span>{shortcut.label}</span>
+                  <span className="text-xl">{shortcut.icon}</span>
+                  <span className="font-medium">{shortcut.label}</span>
                 </button>
               ))}
             </div>

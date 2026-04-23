@@ -119,14 +119,14 @@ export default function ToolCallCard({ id, name, input, output, status, onApprov
   const summary = getInputSummary(name, input);
 
   const statusColors = {
-    running: 'border-blue-500/30 bg-blue-500/5',
-    success: 'border-green-500/30 bg-green-500/5',
-    error: 'border-red-500/30 bg-red-500/5',
-    pending_approval: 'border-yellow-500/30 bg-yellow-500/5',
+    running: 'border-blue-500/20 bg-blue-500/5',
+    success: 'border-emerald-500/20 bg-emerald-500/5',
+    error: 'border-red-500/20 bg-red-500/5',
+    pending_approval: 'border-amber-500/20 bg-amber-500/5',
   };
 
   return (
-    <div className={`my-2 rounded-lg border p-3 text-sm ${statusColors[status]}`}>
+    <div className={`my-1.5 rounded-xl border p-2.5 text-sm animate-fade-in ${statusColors[status]}`}>
       <div className="flex items-center gap-2">
         <span className="text-[var(--muted-foreground)]">{icon}</span>
         <span className="font-medium">{label}</span>
