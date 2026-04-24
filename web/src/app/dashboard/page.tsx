@@ -242,8 +242,16 @@ export default function DashboardPage() {
             <button
               onClick={async () => {
                 setDigestLoading(true);
-                try { const r = await triggerDigest(); setSuggestions(r.suggestions); }
-                catch {} finally { setDigestLoading(false); }
+                try {
+                  const r = await triggerDigest();
+                  if (r.suggestions && r.suggestions.length > 0) {
+                    setSuggestions(r.suggestions);
+                  } else {
+                    setSuggestions([{ emoji: '⏳', title: 'אין מספיק נתונים', description: 'הצופה צריך לאסוף עוד דגימות. נסה שוב בעוד כמה דקות.', actionable: false }]);
+                  }
+                } catch (err: any) {
+                  setSuggestions([{ emoji: '⚠️', title: 'שגיאה', description: err?.message || 'הצופה לא פעיל. ודא ש-ANTHROPIC_API_KEY מוגדר ב-.env', actionable: false }]);
+                } finally { setDigestLoading(false); }
               }}
               disabled={digestLoading}
               className="text-[10px] text-[var(--primary)] hover:underline flex items-center gap-0.5 disabled:opacity-50"

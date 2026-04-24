@@ -246,11 +246,16 @@ app.get('/api/observer/analysis', authMiddleware, (_req, res) => {
 
 app.post('/api/observer/digest', authMiddleware, async (_req, res) => {
   if (!observer) {
-    res.status(400).json({ error: 'Observer not running' });
+    res.status(400).json({ error: 'הצופה לא פעיל. ודא ש-ANTHROPIC_API_KEY מוגדר ב-.env' });
     return;
   }
-  const suggestions = await observer.runDigest();
-  res.json({ suggestions });
+  try {
+    const suggestions = await observer.runDigest();
+    res.json({ suggestions });
+  } catch (err) {
+    console.error('[Observer] Digest error:', (err as Error).message);
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 // ===== USER PROFILE API =====
