@@ -118,7 +118,7 @@ export class ConversationLearner {
 
     try {
       const response = await client.messages.create({
-        model: 'claude-3-haiku-20240307', // Cheap model for background analysis
+        model: 'claude-3-5-haiku-20241022', // Cheap model for background analysis
         max_tokens: 512,
         system: LEARNER_PROMPT,
         messages: [{ role: 'user', content: input }],

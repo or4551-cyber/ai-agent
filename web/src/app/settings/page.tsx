@@ -7,7 +7,7 @@ import { useToast } from '@/components/common/Toast';
 const MODELS = [
   { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', desc: 'חכם ומהיר ($3/$15 למיליון טוקנים)', tier: 'recommended' },
   { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', desc: 'דור קודם ($3/$15 למיליון טוקנים)', tier: 'good' },
-  { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', desc: 'הכי חסכוני ($0.25/$1.25 למיליון טוקנים)', tier: 'budget' },
+  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', desc: 'הכי חסכוני ($0.80/$4 למיליון טוקנים)', tier: 'budget' },
 ];
 
 export default function SettingsPage() {

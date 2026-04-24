@@ -34,7 +34,7 @@ export class ClaudeAgent {
   private static PRICING: Record<string, { input: number; output: number }> = {
     'claude-sonnet-4-20250514': { input: 3, output: 15 },
     'claude-3-5-sonnet-20241022': { input: 3, output: 15 },
-    'claude-3-haiku-20240307': { input: 0.25, output: 1.25 },
+    'claude-3-5-haiku-20241022': { input: 0.80, output: 4 },
   };
 
   constructor(
