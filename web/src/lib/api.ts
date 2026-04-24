@@ -139,7 +139,7 @@ export async function getSuggestions(): Promise<{ suggestions: Suggestion[] }> {
   return apiFetch('/api/observer/suggestions');
 }
 
-export async function triggerDigest(): Promise<{ suggestions: Suggestion[] }> {
+export async function triggerDigest(): Promise<{ suggestions: Suggestion[]; error?: string }> {
   return apiFetch('/api/observer/digest', { method: 'POST' });
 }
 

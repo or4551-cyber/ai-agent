@@ -102,6 +102,25 @@ export default function ChatWindow() {
   const visibleAlerts = alerts.filter(a => !dismissedAlerts.has(a.id));
   const dismissAlert = (id: string) => setDismissedAlerts(prev => new Set(prev).add(id));
 
+  const alertToCommand = (alert: ProactiveAlert): string => {
+    const typeMap: Record<string, string> = {
+      whatsapp: 'תראה לי את ההודעות החדשות בוואטסאפ ותסכם אותן',
+      battery: 'מה שורף לי סוללה? תן לי המלצות לחיסכון',
+      sms: 'תראה לי את ההודעות האחרונות',
+      reminder: 'תראה לי את התזכורות שלי',
+      overdue_reminder: 'תראה לי תזכורות שעבר זמנן ותסדר אותן',
+      meeting_reminder: 'מה הפגישה הקרובה שלי? תן לי פרטים',
+      battery_suggestion: 'הסוללה חמה, מה אפשר לעשות?',
+      storage: 'תסרוק את האחסון ותציע מה למחוק',
+      spam: 'תראה לי התראות ספאם ותעזור לי להשתיק',
+      morning: 'תן לי סיכום בוקר',
+      night: 'תן לי סיכום לפני שינה',
+      mail: 'תראה לי מיילים חדשים',
+      calendar: 'מה ביומן שלי היום?',
+    };
+    return typeMap[alert.type] || `${alert.text} — תטפל בזה`;
+  };
+
   useEffect(() => {
     const selectedModel = typeof window !== 'undefined'
       ? localStorage.getItem('ai_model') || 'claude-sonnet-4-20250514'
@@ -461,21 +480,27 @@ export default function ChatWindow() {
         </div>
       )}
 
-      {/* Alert Banner */}
+      {/* Alert Banner — clickable! */}
       {visibleAlerts.length > 0 && messages.length > 0 && (
         <div className="px-3 pt-2 space-y-1.5 animate-slide-down">
           {visibleAlerts.map(alert => (
             <div
               key={alert.id}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm border animate-fade-in ${
+              onClick={() => {
+                const cmd = alertToCommand(alert);
+                if (cmd) handleSend(cmd);
+                dismissAlert(alert.id);
+              }}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm border animate-fade-in cursor-pointer active:scale-[0.98] transition-transform ${
                 alert.priority === 'high'
-                  ? 'bg-red-500/10 border-red-500/20 text-red-300'
-                  : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+                  ? 'bg-red-500/10 border-red-500/20 text-red-300 hover:bg-red-500/15'
+                  : 'bg-amber-500/10 border-amber-500/20 text-amber-300 hover:bg-amber-500/15'
               }`}
             >
               <span className="text-base">{alert.icon}</span>
               <span className="flex-1 text-[13px]">{alert.text}</span>
-              <button onClick={() => dismissAlert(alert.id)} className="p-0.5 rounded hover:bg-white/10 shrink-0">
+              <span className="text-[10px] opacity-60 shrink-0">טפל בזה →</span>
+              <button onClick={(e) => { e.stopPropagation(); dismissAlert(alert.id); }} className="p-0.5 rounded hover:bg-white/10 shrink-0">
                 <X size={14} />
               </button>
             </div>
@@ -527,19 +552,25 @@ export default function ChatWindow() {
               </button>
             )}
 
-            {/* Alert cards in empty state */}
+            {/* Alert cards in empty state — clickable! */}
             {visibleAlerts.length > 0 && (
               <div className="w-full max-w-xs space-y-2 mb-4">
                 {visibleAlerts.map(alert => (
-                  <div
+                  <button
                     key={alert.id}
-                    className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-[13px] border ${
-                      alert.priority === 'high' ? 'bg-red-500/10 border-red-500/20 text-red-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+                    onClick={() => {
+                      const cmd = alertToCommand(alert);
+                      if (cmd) handleSend(cmd);
+                      dismissAlert(alert.id);
+                    }}
+                    className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-[13px] border text-right cursor-pointer active:scale-[0.98] transition-all ${
+                      alert.priority === 'high' ? 'bg-red-500/10 border-red-500/20 text-red-300 hover:bg-red-500/15' : 'bg-amber-500/10 border-amber-500/20 text-amber-300 hover:bg-amber-500/15'
                     } animate-fade-in`}
                   >
                     <span>{alert.icon}</span>
                     <span className="flex-1">{alert.text}</span>
-                  </div>
+                    <span className="text-[10px] opacity-50">→</span>
+                  </button>
                 ))}
               </div>
             )}

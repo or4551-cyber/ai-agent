@@ -14,8 +14,18 @@ import {
   Camera, Search, FolderOpen, Brain, TrendingUp, Zap, AlertCircle, HardDrive, Settings
 } from 'lucide-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+const ALERT_TYPE_COMMANDS: Record<string, string> = {
+  battery_low: 'מה שורף לי סוללה? תן לי המלצות לחיסכון',
+  battery_full: 'הסוללה מלאה, תראה לי סטטוס סוללה',
+  storage_low: 'תסרוק את האחסון ותציע מה למחוק',
+  notification_spam: 'תראה לי התראות ספאם ותעזור לי להשתיק',
+  memory_high: 'הזיכרון גבוה, מה אפשר לסגור?',
+};
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [briefing, setBriefing] = useState<Record<string, unknown> | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -131,10 +141,21 @@ export default function DashboardPage() {
               <AlertCircle size={13} /> התראות חכמות
             </div>
             {alerts.slice(0, 8).map(a => (
-              <div key={a.id} className={`px-3 py-2.5 border-b border-[var(--border)] last:border-b-0 ${!a.read ? 'bg-[var(--primary)]/5' : ''}`}>
-                <div className="text-xs font-medium">{a.title}</div>
+              <button
+                key={a.id}
+                onClick={() => {
+                  const cmd = ALERT_TYPE_COMMANDS[a.type] || `${a.title} — ${a.message}`;
+                  sessionStorage.setItem('pending_command', cmd);
+                  router.push('/chat');
+                }}
+                className={`w-full text-right px-3 py-2.5 border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--muted)] transition-colors cursor-pointer ${!a.read ? 'bg-[var(--primary)]/5' : ''}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium">{a.title}</div>
+                  <ChevronRight size={12} className="text-[var(--muted-foreground)] opacity-50" />
+                </div>
                 <div className="text-[10px] text-[var(--muted-foreground)]">{a.message}</div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -272,13 +293,23 @@ export default function DashboardPage() {
         ) : (
           <div className="space-y-1.5">
             {suggestions.map((s, i) => (
-              <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)]">
+              <button
+                key={i}
+                onClick={() => {
+                  if (s.actionable) {
+                    sessionStorage.setItem('pending_command', s.description);
+                    router.push('/chat');
+                  }
+                }}
+                className={`w-full flex items-start gap-2 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--card)] text-right ${s.actionable ? 'hover:bg-[var(--muted)] cursor-pointer active:scale-[0.98] transition-all' : ''}`}
+              >
                 <span className="text-base mt-0.5">{s.emoji}</span>
-                <div>
+                <div className="flex-1">
                   <div className="text-xs font-medium">{s.title}</div>
                   <div className="text-[10px] text-[var(--muted-foreground)] mt-0.5">{s.description}</div>
                 </div>
-              </div>
+                {s.actionable && <ChevronRight size={14} className="text-[var(--muted-foreground)] opacity-40 mt-1 shrink-0" />}
+              </button>
             ))}
           </div>
         )}
