@@ -136,6 +136,10 @@ export async function handleCallback(code: string): Promise<boolean> {
       }),
     });
     const data = await res.json() as any;
+    console.log('[GOOGLE] Token response status:', res.status);
+    if (data.error) {
+      console.error('[GOOGLE] Token error:', data.error, data.error_description);
+    }
     if (!data.access_token) return false;
     saveToken({
       access_token: data.access_token,

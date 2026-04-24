@@ -81,15 +81,27 @@ app.get('/api/google/auth', (_req, res) => {
 
 app.get('/api/google/callback', async (req, res) => {
   const code = req.query.code as string;
+  const error = req.query.error as string;
+  console.log('[GOOGLE CALLBACK] code:', code ? 'present' : 'missing', 'error:', error || 'none');
+  if (error) {
+    console.error('[GOOGLE CALLBACK] OAuth error:', error);
+    res.status(400).send(`<html dir="rtl"><body style="background:#09090b;color:#fafafa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column"><h1>❌ שגיאה בחיבור Google</h1><p>${error}</p></body></html>`);
+    return;
+  }
   if (!code) {
     res.status(400).send('Missing code parameter');
     return;
   }
-  const success = await handleCallback(code);
-  if (success) {
-    res.send(`<html dir="rtl"><body style="background:#09090b;color:#fafafa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column"><h1>✅ Google מחובר בהצלחה!</h1><p>אפשר לסגור את החלון הזה. הסוכן מחובר עכשיו ל-Gmail, Drive, Tasks, Calendar ו-Contacts.</p></body></html>`);
-  } else {
-    res.status(500).send(`<html dir="rtl"><body style="background:#09090b;color:#fafafa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh"><h1>❌ שגיאה בחיבור Google</h1></body></html>`);
+  try {
+    const success = await handleCallback(code);
+    if (success) {
+      res.send(`<html dir="rtl"><body style="background:#09090b;color:#fafafa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column"><h1>✅ Google מחובר בהצלחה!</h1><p>אפשר לסגור את החלון הזה. הסוכן מחובר עכשיו ל-Gmail, Drive, Tasks, Calendar ו-Contacts.</p></body></html>`);
+    } else {
+      res.status(500).send(`<html dir="rtl"><body style="background:#09090b;color:#fafafa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column"><h1>❌ שגיאה בחיבור Google</h1><p>Token exchange failed. Check server logs.</p></body></html>`);
+    }
+  } catch (err) {
+    console.error('[GOOGLE CALLBACK] Exception:', err);
+    res.status(500).send(`<html dir="rtl"><body style="background:#09090b;color:#fafafa;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column"><h1>❌ שגיאה</h1><p>${(err as Error).message}</p></body></html>`);
   }
 });
 
