@@ -834,6 +834,60 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== PLUGINS =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'plugin_catalog',
+      description: 'Show available plugins that can be installed to extend agent capabilities. Search by name, topic, or keyword. Use this when the user asks for something you cannot do — there might be a plugin for it.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query — topic, name, or keyword (e.g. "weather", "translate", "crypto"). Leave empty to show all.' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'plugin_install',
+      description: 'Install a plugin from the catalog by name, or create a custom plugin. For catalog: just provide "name". For custom: provide name, description, handler_code (bash script), and input_schema.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Plugin name (from catalog, or new unique name for custom)' },
+          description: { type: 'string', description: 'Plugin description (only for custom plugins)' },
+          handler_code: { type: 'string', description: 'Bash script code for the handler (only for custom plugins). Receives JSON input as $1.' },
+          input_schema: { type: 'object', description: 'JSON Schema for plugin inputs (only for custom plugins)' },
+          dependencies: { type: 'array', items: { type: 'string' }, description: 'System packages to install (only for custom plugins)' },
+        },
+        required: ['name'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'plugin_list',
+      description: 'List all installed plugins with their status and details.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'plugin_uninstall',
+      description: 'Remove an installed plugin.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Name of the plugin to uninstall' },
+        },
+        required: ['name'],
+      },
+    },
+  },
   // ===== BACKUP =====
   {
     dangerLevel: 'safe',
@@ -1162,11 +1216,32 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
   },
 ];
 
+// Singleton plugin manager — lazy loaded to avoid circular deps
+let _pluginManager: import('../services/plugin-manager').PluginManager | null = null;
+function getPluginManager(): import('../services/plugin-manager').PluginManager {
+  if (!_pluginManager) {
+    const { PluginManager } = require('../services/plugin-manager');
+    _pluginManager = new PluginManager();
+  }
+  return _pluginManager!;
+}
+
+export { getPluginManager };
+
 export function getToolDefinitions(): ToolDefinition[] {
-  return TOOL_DEFINITIONS.map((t) => t.definition);
+  const builtIn = TOOL_DEFINITIONS.map((t) => t.definition);
+  const pluginDefs = getPluginManager().getPluginToolDefinitions().map(p => p.definition);
+  return [...builtIn, ...pluginDefs];
 }
 
 export function getDangerLevel(toolName: string): DangerLevel {
   const tool = TOOL_DEFINITIONS.find((t) => t.definition.name === toolName);
-  return tool?.dangerLevel ?? 'dangerous';
+  if (tool) return tool.dangerLevel;
+  // Check plugins
+  if (toolName.startsWith('plugin_')) {
+    const pluginName = toolName.replace('plugin_', '');
+    const plugin = getPluginManager().getPlugin(pluginName);
+    if (plugin) return plugin.meta.dangerLevel;
+  }
+  return 'dangerous';
 }

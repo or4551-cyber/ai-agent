@@ -16,6 +16,8 @@ import { getGoogleStatus } from '../tools/google-auth';
 import * as googleServices from '../tools/google-services';
 import { VoiceModeService } from '../services/voice-mode';
 import { BackupService } from '../services/backup';
+import { getPluginManager } from '../tools/definitions';
+import { searchCatalog, getCatalogEntry, catalogToString } from '../services/plugin-catalog';
 
 const memory = new AgentMemory();
 const reminderService = new ReminderService();
@@ -294,6 +296,63 @@ async function executeToolInternal(
     case 'get_sensors':
       return termuxApi.getSensors(input.sensor_name as string | undefined);
 
+    // Plugins
+    case 'plugin_catalog': {
+      const query = input.query as string | undefined;
+      if (query) {
+        const results = searchCatalog(query);
+        if (results.length === 0) return `לא נמצאו פלגינים עבור "${query}". אני יכול ליצור פלגין חדש מותאם אישית — פשוט תגיד לי מה אתה צריך.`;
+        return `🔍 נמצאו ${results.length} פלגינים עבור "${query}":\n\n` +
+          results.map(p => `📦 **${p.name}** — ${p.descriptionHe}\n   תלויות: ${p.dependencies.join(', ') || 'אין'}`).join('\n\n') +
+          `\n\nלהתקין? השתמש ב-plugin_install עם שם הפלגין.`;
+      }
+      return `📋 קטלוג פלגינים זמינים:\n\n${catalogToString()}\n\nלהתקנה: plugin_install name="<שם>"`;
+    }
+
+    case 'plugin_install': {
+      const pm = getPluginManager();
+      const name = input.name as string;
+      
+      // Try catalog first
+      const catalogEntry = getCatalogEntry(name);
+      if (catalogEntry) {
+        return pm.install(
+          catalogEntry.name,
+          catalogEntry.description,
+          catalogEntry.handlerCode,
+          catalogEntry.inputSchema,
+          {
+            dangerLevel: catalogEntry.dangerLevel,
+            version: catalogEntry.version,
+            author: catalogEntry.author,
+            source: 'catalog',
+            dependencies: catalogEntry.dependencies,
+          }
+        );
+      }
+
+      // Custom plugin
+      const desc = input.description as string;
+      const handlerCode = input.handler_code as string;
+      const schema = input.input_schema as Record<string, unknown>;
+      const deps = input.dependencies as string[] | undefined;
+
+      if (!desc || !handlerCode) {
+        return `❌ פלגין "${name}" לא נמצא בקטלוג. ליצירת פלגין מותאם, ספק: description, handler_code ו-input_schema.`;
+      }
+
+      return pm.install(name, desc, handlerCode, schema || { type: 'object', properties: {} }, {
+        source: 'ai-generated',
+        dependencies: deps,
+      });
+    }
+
+    case 'plugin_list':
+      return getPluginManager().list();
+
+    case 'plugin_uninstall':
+      return getPluginManager().uninstall(input.name as string);
+
     // Backup
     case 'backup_create':
       return backupService.createBackup();
@@ -379,7 +438,14 @@ async function executeToolInternal(
     case 'google_contacts':
       return googleServices.contactsList(input.query as string | undefined, (input.max_results as number) || 20);
 
-    default:
+    default: {
+      // Try executing as a plugin
+      const pm = getPluginManager();
+      if (pm.isPluginTool(toolName)) {
+        const pluginName = toolName.replace('plugin_', '');
+        return pm.execute(pluginName, input);
+      }
       return `Unknown tool: ${toolName}`;
+    }
   }
 }
