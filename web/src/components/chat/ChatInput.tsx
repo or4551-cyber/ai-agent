@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Send, Square, ImagePlus, X, Mic, MicOff } from 'lucide-react';
+import type { ProactiveAlert } from '@/lib/api';
 
 export interface ImageAttachment {
   base64: string;
@@ -14,9 +15,44 @@ interface ChatInputProps {
   onAbort?: () => void;
   disabled?: boolean;
   isStreaming?: boolean;
+  alerts?: ProactiveAlert[];
+  hasMessages?: boolean;
 }
 
-export default function ChatInput({ onSend, onAbort, disabled, isStreaming }: ChatInputProps) {
+function getContextChips(alerts?: ProactiveAlert[]): { label: string; msg: string }[] {
+  const h = new Date().getHours();
+  const hasBatteryAlert = alerts?.some(a => a.type === 'battery');
+
+  if (hasBatteryAlert) {
+    return [
+      { label: '🔋 מה שורף סוללה?', msg: 'מה שורף סוללה?' },
+      { label: '✈️ מצב חיסכון', msg: 'תפעיל מצב חיסכון בסוללה' },
+      { label: '📊 צריכת סוללה', msg: 'תראה לי צריכת סוללה' },
+    ];
+  }
+
+  if (h >= 6 && h < 12) {
+    return [
+      { label: '☀️ סיכום בוקר', msg: 'תן לי סיכום בוקר' },
+      { label: '📅 מה ביומן?', msg: 'מה ביומן שלי היום?' },
+      { label: '🔋 סוללה', msg: 'כמה סוללה נשארה?' },
+    ];
+  }
+  if (h >= 17 && h < 23) {
+    return [
+      { label: '📊 סיכום יום', msg: 'תן לי סיכום יום' },
+      { label: '⏰ תזכורות למחר', msg: 'מה התזכורות שלי למחר?' },
+      { label: '🔇 מצב שקט', msg: 'תפעיל מצב שקט' },
+    ];
+  }
+  return [
+    { label: '🔋 סוללה', msg: 'כמה סוללה?' },
+    { label: '📅 יומן', msg: 'מה ביומן שלי?' },
+    { label: '📧 מיילים', msg: 'תראה לי מיילים חדשים' },
+  ];
+}
+
+export default function ChatInput({ onSend, onAbort, disabled, isStreaming, alerts, hasMessages }: ChatInputProps) {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [isListening, setIsListening] = useState(false);
@@ -111,8 +147,26 @@ export default function ChatInput({ onSend, onAbort, disabled, isStreaming }: Ch
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const chips = getContextChips(alerts);
+
   return (
     <div className="glass border-t border-[var(--border)] px-3 py-3 pb-[env(safe-area-inset-bottom)] shrink-0">
+      {/* Context Chips */}
+      {hasMessages && !isStreaming && chips.length > 0 && (
+        <div className="flex gap-1.5 mb-2 max-w-3xl mx-auto overflow-x-auto pb-0.5 scrollbar-hide">
+          {chips.map(chip => (
+            <button
+              key={chip.label}
+              onClick={() => onSend(chip.msg)}
+              disabled={disabled}
+              className="shrink-0 px-3 py-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] hover:border-[var(--primary)]/30 text-[12px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-all disabled:opacity-30 whitespace-nowrap"
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Image previews */}
       {images.length > 0 && (
         <div className="flex gap-2 mb-2.5 max-w-3xl mx-auto overflow-x-auto pb-1">

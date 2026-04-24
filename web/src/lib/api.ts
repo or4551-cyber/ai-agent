@@ -282,6 +282,20 @@ export async function getDashboard(): Promise<Record<string, unknown>> {
   return apiFetch('/api/dashboard');
 }
 
+// ===== PROACTIVE ALERTS =====
+
+export interface ProactiveAlert {
+  id: string;
+  type: string;
+  icon: string;
+  text: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export async function getProactiveAlerts(): Promise<{ alerts: ProactiveAlert[]; timestamp: number }> {
+  return apiFetch('/api/proactive-alerts');
+}
+
 // ===== GALLERY =====
 
 export interface GalleryImage {

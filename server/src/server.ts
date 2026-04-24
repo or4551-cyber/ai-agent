@@ -109,6 +109,74 @@ app.get('/api/google/status', authMiddleware, (_req, res) => {
   res.json(getGoogleStatus());
 });
 
+// ===== PROACTIVE ALERTS API =====
+
+app.get('/api/proactive-alerts', authMiddleware, async (_req, res) => {
+  const alerts: { id: string; type: string; icon: string; text: string; priority: 'high' | 'medium' | 'low' }[] = [];
+
+  try {
+    // Battery check
+    const { getBattery, getNotifications, calendarList } = require('./tools/termux-api');
+    try {
+      const batteryRaw = await getBattery();
+      const match = batteryRaw.match(/(\d+)%/);
+      if (match) {
+        const pct = parseInt(match[1]);
+        if (pct <= 15) alerts.push({ id: 'bat', type: 'battery', icon: '🪫', text: `סוללה ${pct}% — כדאי לטעון עכשיו!`, priority: 'high' });
+        else if (pct <= 25) alerts.push({ id: 'bat', type: 'battery', icon: '🔋', text: `סוללה ${pct}% — שים לב`, priority: 'medium' });
+      }
+    } catch {}
+
+    // Calendar — events in next 30 minutes
+    try {
+      const calRaw = await calendarList(1);
+      if (calRaw && !calRaw.includes('אין אירועים') && !calRaw.includes('לא הצלחתי')) {
+        const lines = calRaw.split('\n').filter((l: string) => l.includes('📅'));
+        const now = Date.now();
+        for (const line of lines.slice(0, 3)) {
+          const timeMatch = line.match(/(\d{1,2}):(\d{2})/);
+          if (timeMatch) {
+            const today = new Date();
+            today.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
+            const diff = today.getTime() - now;
+            if (diff > 0 && diff < 30 * 60 * 1000) {
+              alerts.push({ id: `cal-${timeMatch[0]}`, type: 'calendar', icon: '📅', text: `פגישה בעוד ${Math.round(diff / 60000)} דקות: ${line.replace(/📅\s*/, '').trim()}`, priority: 'high' });
+            }
+          }
+        }
+      }
+    } catch {}
+
+    // WhatsApp unread
+    try {
+      const notifRaw = await getNotifications();
+      if (notifRaw) {
+        const waMatch = notifRaw.match(/(\d+)\s*הודעות?\s*(?:חדשות?|from)/i) || notifRaw.match(/WhatsApp.*?(\d+)/);
+        const waLines = notifRaw.split('\n').filter((l: string) => l.toLowerCase().includes('whatsapp'));
+        if (waLines.length > 0) {
+          alerts.push({ id: 'wa', type: 'whatsapp', icon: '💬', text: `${waLines.length} הודעות ווטסאפ חדשות`, priority: 'medium' });
+        }
+      }
+    } catch {}
+
+    // Storage check — using disk free
+    try {
+      const { runCommand } = require('./tools/command');
+      const dfRaw = await runCommand('df /storage/emulated/0 2>/dev/null | tail -1', undefined, 5000);
+      const parts = dfRaw.trim().split(/\s+/);
+      if (parts.length >= 5) {
+        const usePct = parseInt(parts[4].replace('%', ''));
+        if (usePct >= 90) alerts.push({ id: 'storage', type: 'storage', icon: '💾', text: `אחסון כמעט מלא (${usePct}%)`, priority: 'high' });
+        else if (usePct >= 85) alerts.push({ id: 'storage', type: 'storage', icon: '💾', text: `אחסון ${usePct}% — שים לב`, priority: 'medium' });
+      }
+    } catch {}
+  } catch (err) {
+    console.error('[PROACTIVE] Error:', (err as Error).message);
+  }
+
+  res.json({ alerts, timestamp: Date.now() });
+});
+
 // ===== BRIEFING API =====
 
 app.get('/api/briefing', authMiddleware, (_req, res) => {

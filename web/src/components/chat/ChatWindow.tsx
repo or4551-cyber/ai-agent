@@ -5,12 +5,13 @@ import { AgentWebSocket, WSEvent } from '@/lib/websocket';
 import MessageBubble from './MessageBubble';
 import TypingIndicator from './TypingIndicator';
 import ChatInput, { ImageAttachment } from './ChatInput';
-import { Wifi, WifiOff, Trash2, DollarSign, History, Plus, Sparkles } from 'lucide-react';
+import { DollarSign, History, Plus, Sparkles, X, Sun, Moon, Sunset, Coffee, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import {
   listConversations, getConversation, saveConversation,
   deleteConversation, generateTitle, Conversation, StoredMessage
 } from '@/lib/chat-storage';
+import { getProactiveAlerts, ProactiveAlert } from '@/lib/api';
 
 interface ToolCall {
   id: string;
@@ -44,6 +45,8 @@ export default function ChatWindow() {
   const [conversationId, setConversationId] = useState<string>(() => `conv-${Date.now()}`);
   const [showHistory, setShowHistory] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [alerts, setAlerts] = useState<ProactiveAlert[]>([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const wsRef = useRef<AgentWebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentAssistantId = useRef<string>('');
@@ -51,6 +54,23 @@ export default function ChatWindow() {
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
+
+  // Proactive alerts polling
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const data = await getProactiveAlerts();
+        if (active && data.alerts) setAlerts(data.alerts);
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 60000);
+    return () => { active = false; clearInterval(interval); };
+  }, []);
+
+  const visibleAlerts = alerts.filter(a => !dismissedAlerts.has(a.id));
+  const dismissAlert = (id: string) => setDismissedAlerts(prev => new Set(prev).add(id));
 
   useEffect(() => {
     const selectedModel = typeof window !== 'undefined'
@@ -384,46 +404,119 @@ export default function ChatWindow() {
         </div>
       )}
 
+      {/* Alert Banner */}
+      {visibleAlerts.length > 0 && messages.length > 0 && (
+        <div className="px-3 pt-2 space-y-1.5 animate-slide-down">
+          {visibleAlerts.map(alert => (
+            <div
+              key={alert.id}
+              className={`flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm border animate-fade-in ${
+                alert.priority === 'high'
+                  ? 'bg-red-500/10 border-red-500/20 text-red-300'
+                  : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+              }`}
+            >
+              <span className="text-base">{alert.icon}</span>
+              <span className="flex-1 text-[13px]">{alert.text}</span>
+              <button onClick={() => dismissAlert(alert.id)} className="p-0.5 rounded hover:bg-white/10 shrink-0">
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center animate-fade-in">
-            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[var(--primary)] to-purple-600 flex items-center justify-center mb-5 shadow-2xl shadow-[var(--primary)]/30">
-              <span className="text-4xl">🤖</span>
+            {/* Greeting */}
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[var(--primary)] to-cyan-500 flex items-center justify-center mb-4 shadow-xl shadow-[var(--primary)]/20">
+              {(() => {
+                const h = new Date().getHours();
+                if (h >= 6 && h < 12) return <Sun size={26} className="text-amber-300" />;
+                if (h >= 12 && h < 17) return <Coffee size={26} className="text-orange-300" />;
+                if (h >= 17 && h < 21) return <Sunset size={26} className="text-pink-300" />;
+                return <Moon size={26} className="text-blue-300" />;
+              })()}
             </div>
-            <h2 className="text-xl font-bold text-[var(--foreground)] mb-1.5">היי, מה נעשה?</h2>
-            <p className="text-sm text-[var(--muted-foreground)] max-w-[280px] mb-8 leading-relaxed">
-              אני הסוכן שלך — שליטה מלאה על המכשיר, קבצים, מצלמה, הודעות ועוד.
+            <h2 className="text-lg font-bold text-[var(--foreground)] mb-1">
+              {(() => {
+                const h = new Date().getHours();
+                if (h >= 6 && h < 12) return 'בוקר טוב! ☀️';
+                if (h >= 12 && h < 17) return 'צהריים טובים! 🌤️';
+                if (h >= 17 && h < 21) return 'ערב טוב! 🌆';
+                return 'לילה טוב! 🌙';
+              })()}
+            </h2>
+            <p className="text-[13px] text-[var(--muted-foreground)] max-w-[260px] mb-5 leading-relaxed">
+              איך אפשר לעזור?
             </p>
-            <div className="grid grid-cols-2 gap-2.5 w-full max-w-xs">
+
+            {/* Morning Briefing Card */}
+            {new Date().getHours() >= 6 && new Date().getHours() < 10 && (
+              <button
+                onClick={() => handleSend('תן לי סיכום בוקר')}
+                className="w-full max-w-xs mb-4 p-3.5 rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-cyan-500/10 to-[var(--primary)]/10 text-right animate-slide-up"
+                style={{ animationDelay: '0ms', animationFillMode: 'backwards' }}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Sun size={16} className="text-amber-400" />
+                  <span className="text-sm font-semibold text-[var(--foreground)]">סיכום בוקר</span>
+                </div>
+                <p className="text-[12px] text-[var(--muted-foreground)] leading-relaxed">
+                  סוללה, יומן, הודעות, תזכורות — הכל במקום אחד
+                </p>
+              </button>
+            )}
+
+            {/* Alert cards in empty state */}
+            {visibleAlerts.length > 0 && (
+              <div className="w-full max-w-xs space-y-2 mb-4">
+                {visibleAlerts.map(alert => (
+                  <div
+                    key={alert.id}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-[13px] border ${
+                      alert.priority === 'high' ? 'bg-red-500/10 border-red-500/20 text-red-300' : 'bg-amber-500/10 border-amber-500/20 text-amber-300'
+                    } animate-fade-in`}
+                  >
+                    <span>{alert.icon}</span>
+                    <span className="flex-1">{alert.text}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Quick Actions — 2 rows of 4 */}
+            <div className="grid grid-cols-4 gap-2 w-full max-w-xs">
               {[
                 { icon: '🔋', label: 'סוללה', msg: 'כמה סוללה נשארה?' },
-                { icon: '�️', label: 'סרוק אחסון', msg: 'תסרוק את האחסון ותגיד לי מה אפשר למחוק' },
-                { icon: '📁', label: 'קבצים', msg: 'תראה לי את הקבצים בתיקייה הנוכחית' },
-                { icon: '🧹', label: 'נקה cache', msg: 'תנקה את כל ה-cache במכשיר' },
-                { icon: '🌤️', label: 'מזג אוויר', msg: 'מה מזג האוויר היום?' },
-                { icon: '📸', label: 'צלם תמונה', msg: 'תצלם תמונה' },
-                { icon: '📍', label: 'מיקום', msg: 'איפה אני נמצא?' },
-                { icon: '🔔', label: 'התראות', msg: 'מה ההתראות האחרונות?' },
-              ].map((shortcut, i) => (
+                { icon: '📅', label: 'יומן', msg: 'מה ביומן שלי היום?' },
+                { icon: '�', label: 'מיילים', msg: 'תראה לי מיילים שלא קראתי' },
+                { icon: '📸', label: 'צלם', msg: 'תצלם תמונה' },
+                { icon: '💾', label: 'אחסון', msg: 'תסרוק את האחסון' },
+                { icon: '�', label: 'מיקום', msg: 'איפה אני נמצא?' },
+                { icon: '�', label: 'התראות', msg: 'מה ההתראות האחרונות?' },
+                { icon: '✅', label: 'משימות', msg: 'תראה לי את המשימות שלי' },
+              ].map((s, i) => (
                 <button
-                  key={shortcut.label}
-                  onClick={() => handleSend(shortcut.msg)}
-                  className="flex items-center gap-2.5 px-3.5 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] hover:border-[var(--muted-foreground)]/20 transition-all text-sm text-right animate-slide-up"
-                  style={{ animationDelay: `${i * 60}ms`, animationFillMode: 'backwards' }}
+                  key={s.label}
+                  onClick={() => handleSend(s.msg)}
+                  className="flex flex-col items-center gap-1.5 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] hover:border-[var(--muted-foreground)]/20 transition-all animate-slide-up"
+                  style={{ animationDelay: `${i * 40}ms`, animationFillMode: 'backwards' }}
                 >
-                  <span className="text-xl">{shortcut.icon}</span>
-                  <span className="font-medium">{shortcut.label}</span>
+                  <span className="text-xl">{s.icon}</span>
+                  <span className="text-[11px] font-medium text-[var(--muted-foreground)]">{s.label}</span>
                 </button>
               ))}
             </div>
             <Link
               href="/capabilities"
               className="mt-4 flex items-center gap-1.5 text-xs text-purple-400 hover:text-purple-300 transition-all animate-slide-up"
-              style={{ animationDelay: '500ms', animationFillMode: 'backwards' }}
+              style={{ animationDelay: '400ms', animationFillMode: 'backwards' }}
             >
               <Sparkles size={13} />
-              ראה את כל היכולות שלי
+              כל היכולות
             </Link>
           </div>
         )}
@@ -446,6 +539,8 @@ export default function ChatWindow() {
         onSend={handleSend}
         disabled={!connected}
         isStreaming={isStreaming}
+        alerts={alerts}
+        hasMessages={messages.length > 0}
       />
     </div>
   );

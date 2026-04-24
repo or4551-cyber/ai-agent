@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { MessageCircle, FolderOpen, Image, LayoutDashboard, Smartphone, Menu, X } from 'lucide-react';
+import { getProactiveAlerts } from '@/lib/api';
 
 const NAV_ITEMS = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'בית' },
@@ -16,7 +17,21 @@ const NAV_ITEMS = [
 export default function BottomNav() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [alertCount, setAlertCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const data = await getProactiveAlerts();
+        if (active) setAlertCount(data.alerts?.length || 0);
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 60000);
+    return () => { active = false; clearInterval(interval); };
+  }, []);
 
   // Close on outside click
   useEffect(() => {
@@ -63,13 +78,18 @@ export default function BottomNav() {
       {/* FAB button */}
       <button
         onClick={() => setOpen(!open)}
-        className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 ${
+        className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-90 relative ${
           open
             ? 'bg-[var(--muted)] text-[var(--foreground)] rotate-90'
             : 'bg-gradient-to-br from-[var(--primary)] to-purple-600 text-white shadow-[var(--primary)]/30'
         }`}
       >
         {open ? <X size={20} /> : <Menu size={20} />}
+        {!open && alertCount > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-[10px] text-white font-bold flex items-center justify-center shadow-md animate-pulse-soft">
+            {alertCount}
+          </span>
+        )}
       </button>
     </div>
   );
