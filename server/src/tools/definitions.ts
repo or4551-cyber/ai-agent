@@ -834,6 +834,51 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== BACKUP =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'backup_create',
+      description: 'Create a backup of all agent data (memory, reminders, routines, conversations, user profile). Saves to internal and external storage.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'backup_list',
+      description: 'List all available backups with their timestamps and sizes.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'backup_restore',
+      description: 'Restore agent data from a backup. Without a backup_id, restores the latest backup. Requires server restart after restore.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          backup_id: { type: 'string', description: 'Specific backup ID to restore (e.g. "backup-2024-01-15T10-30-00"). Leave empty for latest.' },
+        },
+      },
+    },
+  },
+  // ===== VOICE MODE =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'voice_chat',
+      description: 'Start or stop voice conversation mode. In voice mode: the phone listens via microphone (STT), sends to agent, and speaks the response (TTS). Say "עצור" or "stop" to end.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', description: '"start" to begin voice mode, "stop" to end it', enum: ['start', 'stop'] },
+        },
+        required: ['action'],
+      },
+    },
+  },
   // ===== GOOGLE SERVICES =====
   {
     dangerLevel: 'safe',

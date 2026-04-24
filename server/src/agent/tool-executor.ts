@@ -14,11 +14,15 @@ import { StorageScanner } from '../services/storage-scanner';
 import { speechToText, textToSpeech } from '../tools/voice';
 import { getGoogleStatus } from '../tools/google-auth';
 import * as googleServices from '../tools/google-services';
+import { VoiceModeService } from '../services/voice-mode';
+import { BackupService } from '../services/backup';
 
 const memory = new AgentMemory();
 const reminderService = new ReminderService();
 const routineService = new RoutineService();
 const storageScanner = new StorageScanner();
+const backupService = new BackupService();
+let globalVoiceMode: VoiceModeService | null = null;
 
 export interface ExecutionResult {
   output: string;
@@ -289,6 +293,31 @@ async function executeToolInternal(
     // Sensors
     case 'get_sensors':
       return termuxApi.getSensors(input.sensor_name as string | undefined);
+
+    // Backup
+    case 'backup_create':
+      return backupService.createBackup();
+    case 'backup_list': {
+      const backups = backupService.listBackups();
+      if (backups.length === 0) return 'אין גיבויים זמינים עדיין. השתמש ב-backup_create כדי ליצור גיבוי.';
+      return backups.map(b => `📦 ${b.id}\n   📅 ${b.timestamp}\n   📁 ${b.fileCount} קבצים (${(b.size / 1024).toFixed(0)} KB)`).join('\n\n');
+    }
+    case 'backup_restore':
+      return backupService.restoreBackup(input.backup_id as string | undefined);
+
+    // Voice Mode
+    case 'voice_chat': {
+      if (!globalVoiceMode) {
+        globalVoiceMode = new VoiceModeService();
+      }
+      const vm = globalVoiceMode;
+      const action = input.action as string;
+      if (action === 'start') {
+        return vm.start();
+      } else {
+        return vm.stop();
+      }
+    }
 
     // ===== GOOGLE SERVICES =====
     case 'google_status': {

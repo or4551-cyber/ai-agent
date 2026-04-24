@@ -19,6 +19,8 @@ import { StorageScanner } from './services/storage-scanner';
 import { SmartAlertsService } from './services/smart-alerts';
 import { ConversationHistoryService } from './services/conversation-history';
 import { getAuthUrl, handleCallback, getGoogleStatus } from './tools/google-auth';
+import { ProactiveAgentService } from './services/proactive-agent';
+import { BackupService } from './services/backup';
 
 dotenv.config();
 
@@ -40,6 +42,10 @@ if (process.env.ANTHROPIC_API_KEY) {
   observer = new ObserverService(process.env.ANTHROPIC_API_KEY);
   observer.start();
 }
+
+const proactiveAgent = new ProactiveAgentService();
+proactiveAgent.start();
+const backupService = new BackupService();
 
 const localLLM = new LocalLLM();
 
@@ -111,6 +117,41 @@ app.get('/api/google/callback', async (req, res) => {
 
 app.get('/api/google/status', authMiddleware, (_req, res) => {
   res.json(getGoogleStatus());
+});
+
+// ===== BACKUP API =====
+
+app.post('/api/backup/create', authMiddleware, async (_req, res) => {
+  try {
+    const result = await backupService.createBackup();
+    res.json({ message: result });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.get('/api/backup/list', authMiddleware, (_req, res) => {
+  res.json({ backups: backupService.listBackups() });
+});
+
+app.post('/api/backup/restore', authMiddleware, async (req, res) => {
+  try {
+    const result = await backupService.restoreBackup(req.body?.backup_id);
+    res.json({ message: result });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ===== PROACTIVE AGENT API =====
+
+app.get('/api/proactive-actions', authMiddleware, (_req, res) => {
+  res.json({ actions: proactiveAgent.getActions() });
+});
+
+app.post('/api/proactive-actions/:id/dismiss', authMiddleware, (req, res) => {
+  proactiveAgent.dismiss(req.params.id as string);
+  res.json({ ok: true });
 });
 
 // ===== PROACTIVE ALERTS API =====
@@ -873,6 +914,16 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 
 // Active agents per connection
 const agents = new Map<string, ClaudeAgent>();
+
+// Proactive agent broadcasts to all connected clients
+proactiveAgent.setNotifyHandler((action) => {
+  const msg = JSON.stringify({ type: 'proactive_action', payload: action });
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
+    }
+  });
+});
 
 wss.on('connection', (ws: WebSocket, req) => {
   // Auth check
