@@ -1,4 +1,3 @@
-import { google } from 'googleapis';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -16,7 +15,13 @@ const SCOPES = [
   'https://www.googleapis.com/auth/contacts.readonly',
 ];
 
-let oauth2Client: InstanceType<typeof google.auth.OAuth2> | null = null;
+interface TokenData {
+  access_token: string;
+  refresh_token?: string;
+  expiry_date?: number;
+}
+
+let cachedToken: TokenData | null = null;
 
 function getCredentials() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -26,68 +31,117 @@ function getCredentials() {
   return { clientId, clientSecret, redirectUri };
 }
 
-export function getOAuth2Client(): InstanceType<typeof google.auth.OAuth2> | null {
-  if (oauth2Client) return oauth2Client;
+function loadToken(): TokenData | null {
+  if (cachedToken) return cachedToken;
+  if (!fs.existsSync(TOKEN_PATH)) return null;
+  try {
+    cachedToken = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
+    console.log('[GOOGLE] Loaded saved token');
+    return cachedToken;
+  } catch { return null; }
+}
 
+function saveToken(token: TokenData) {
+  const existing = loadToken() || {} as TokenData;
+  cachedToken = { ...existing, ...token };
+  fs.writeFileSync(TOKEN_PATH, JSON.stringify(cachedToken, null, 2));
+}
+
+async function refreshAccessToken(): Promise<string | null> {
   const creds = getCredentials();
-  if (!creds) return null;
-
-  oauth2Client = new google.auth.OAuth2(creds.clientId, creds.clientSecret, creds.redirectUri);
-
-  // Load saved token
-  if (fs.existsSync(TOKEN_PATH)) {
-    try {
-      const token = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8'));
-      oauth2Client.setCredentials(token);
-
-      // Auto-refresh token
-      oauth2Client.on('tokens', (tokens) => {
-        const existing = fs.existsSync(TOKEN_PATH) ? JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8')) : {};
-        const merged = { ...existing, ...tokens };
-        fs.writeFileSync(TOKEN_PATH, JSON.stringify(merged, null, 2));
-        console.log('[GOOGLE] Token refreshed and saved');
-      });
-
-      console.log('[GOOGLE] Loaded saved token');
-    } catch (err) {
-      console.error('[GOOGLE] Failed to load token:', (err as Error).message);
+  const token = loadToken();
+  if (!creds || !token?.refresh_token) return null;
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
+        refresh_token: token.refresh_token,
+        grant_type: 'refresh_token',
+      }),
+    });
+    const data = await res.json() as any;
+    if (data.access_token) {
+      saveToken({ ...token, access_token: data.access_token, expiry_date: Date.now() + (data.expires_in || 3600) * 1000 });
+      console.log('[GOOGLE] Token refreshed');
+      return data.access_token;
     }
+    return null;
+  } catch (err) {
+    console.error('[GOOGLE] Refresh failed:', (err as Error).message);
+    return null;
   }
+}
 
-  return oauth2Client;
+export async function getAccessToken(): Promise<string | null> {
+  const token = loadToken();
+  if (!token?.access_token) return null;
+  if (token.expiry_date && Date.now() > token.expiry_date - 300000) {
+    return refreshAccessToken();
+  }
+  return token.access_token;
+}
+
+export async function googleFetch(url: string, options?: RequestInit): Promise<any> {
+  let accessToken = await getAccessToken();
+  if (!accessToken) throw new Error('Google not connected. Visit /api/google/auth');
+  let res = await fetch(url, {
+    ...options,
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', ...options?.headers },
+  });
+  if (res.status === 401) {
+    accessToken = await refreshAccessToken();
+    if (!accessToken) throw new Error('Google token expired. Re-auth at /api/google/auth');
+    res = await fetch(url, {
+      ...options,
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', ...options?.headers },
+    });
+  }
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({ error: { message: res.statusText } })) as any;
+    throw new Error(errData.error?.message || res.statusText);
+  }
+  return res.json();
 }
 
 export function getAuthUrl(): string | null {
   const creds = getCredentials();
   if (!creds) return null;
-
-  const client = getOAuth2Client();
-  if (!client) return null;
-
-  return client.generateAuthUrl({
+  const params = new URLSearchParams({
+    client_id: creds.clientId,
+    redirect_uri: creds.redirectUri,
+    response_type: 'code',
+    scope: SCOPES.join(' '),
     access_type: 'offline',
-    scope: SCOPES,
     prompt: 'consent',
   });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
 
 export async function handleCallback(code: string): Promise<boolean> {
-  const client = getOAuth2Client();
-  if (!client) return false;
-
+  const creds = getCredentials();
+  if (!creds) return false;
   try {
-    const { tokens } = await client.getToken(code);
-    client.setCredentials(tokens);
-    fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2));
-
-    // Setup auto-refresh
-    client.on('tokens', (newTokens) => {
-      const existing = fs.existsSync(TOKEN_PATH) ? JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf-8')) : {};
-      const merged = { ...existing, ...newTokens };
-      fs.writeFileSync(TOKEN_PATH, JSON.stringify(merged, null, 2));
-      console.log('[GOOGLE] Token auto-refreshed');
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
+        redirect_uri: creds.redirectUri,
+        grant_type: 'authorization_code',
+      }),
     });
-
+    const data = await res.json() as any;
+    if (!data.access_token) return false;
+    saveToken({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      expiry_date: Date.now() + (data.expires_in || 3600) * 1000,
+    });
     console.log('[GOOGLE] OAuth tokens saved successfully');
     return true;
   } catch (err) {
@@ -97,10 +151,8 @@ export async function handleCallback(code: string): Promise<boolean> {
 }
 
 export function isAuthenticated(): boolean {
-  const client = getOAuth2Client();
-  if (!client) return false;
-  const creds = client.credentials;
-  return !!(creds && creds.access_token);
+  const token = loadToken();
+  return !!(token && token.access_token);
 }
 
 export function getGoogleStatus(): { configured: boolean; authenticated: boolean; authUrl: string | null } {

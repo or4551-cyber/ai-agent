@@ -1,91 +1,58 @@
-import { google } from 'googleapis';
-import { getOAuth2Client, isAuthenticated } from './google-auth';
+import { googleFetch } from './google-auth';
 
-function requireAuth() {
-  if (!isAuthenticated()) {
-    throw new Error('Google לא מחובר. השתמש בכתובת /api/google/auth בדפדפן כדי להתחבר.');
-  }
-  return getOAuth2Client()!;
-}
+const G = 'https://www.googleapis.com';
 
 // ===================== GMAIL =====================
 
 export async function gmailListMessages(query?: string, maxResults = 10): Promise<string> {
-  const auth = requireAuth();
-  const gmail = google.gmail({ version: 'v1', auth });
-
-  const res = await gmail.users.messages.list({
-    userId: 'me',
-    q: query || 'is:inbox',
-    maxResults,
-  });
-
-  if (!res.data.messages || res.data.messages.length === 0) {
+  const q = encodeURIComponent(query || 'is:inbox');
+  const list = await googleFetch(`${G}/gmail/v1/users/me/messages?q=${q}&maxResults=${maxResults}`);
+  if (!list.messages || list.messages.length === 0) {
     return query ? `📭 לא נמצאו מיילים עבור: "${query}"` : '📭 תיבת הדואר ריקה.';
   }
 
   const details = await Promise.all(
-    res.data.messages.slice(0, maxResults).map(async (msg) => {
-      const detail = await gmail.users.messages.get({
-        userId: 'me',
-        id: msg.id!,
-        format: 'metadata',
-        metadataHeaders: ['From', 'Subject', 'Date'],
-      });
-      const headers = detail.data.payload?.headers || [];
-      const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
-      const subject = headers.find(h => h.name === 'Subject')?.value || '(ללא נושא)';
-      const date = headers.find(h => h.name === 'Date')?.value || '';
-      const snippet = detail.data.snippet || '';
-      const isUnread = detail.data.labelIds?.includes('UNREAD');
+    list.messages.slice(0, maxResults).map(async (msg: any) => {
+      const d = await googleFetch(`${G}/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`);
+      const headers = d.payload?.headers || [];
+      const from = headers.find((h: any) => h.name === 'From')?.value || 'Unknown';
+      const subject = headers.find((h: any) => h.name === 'Subject')?.value || '(ללא נושא)';
+      const date = headers.find((h: any) => h.name === 'Date')?.value || '';
+      const snippet = d.snippet || '';
+      const isUnread = d.labelIds?.includes('UNREAD');
       return `${isUnread ? '🔵' : '📩'} **${subject}**\nמאת: ${from}\n${snippet.slice(0, 100)}${snippet.length > 100 ? '...' : ''}\n📅 ${date}\nID: ${msg.id}`;
     })
   );
-
   return details.join('\n\n---\n\n');
 }
 
 export async function gmailReadMessage(messageId: string): Promise<string> {
-  const auth = requireAuth();
-  const gmail = google.gmail({ version: 'v1', auth });
+  const d = await googleFetch(`${G}/gmail/v1/users/me/messages/${messageId}?format=full`);
+  const headers = d.payload?.headers || [];
+  const from = headers.find((h: any) => h.name === 'From')?.value || 'Unknown';
+  const to = headers.find((h: any) => h.name === 'To')?.value || '';
+  const subject = headers.find((h: any) => h.name === 'Subject')?.value || '(ללא נושא)';
+  const date = headers.find((h: any) => h.name === 'Date')?.value || '';
 
-  const detail = await gmail.users.messages.get({
-    userId: 'me',
-    id: messageId,
-    format: 'full',
-  });
-
-  const headers = detail.data.payload?.headers || [];
-  const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
-  const to = headers.find(h => h.name === 'To')?.value || '';
-  const subject = headers.find(h => h.name === 'Subject')?.value || '(ללא נושא)';
-  const date = headers.find(h => h.name === 'Date')?.value || '';
-
-  // Extract body
   let body = '';
-  const payload = detail.data.payload;
+  const payload = d.payload;
   if (payload?.body?.data) {
-    body = Buffer.from(payload.body.data, 'base64').toString('utf-8');
+    body = Buffer.from(payload.body.data, 'base64url').toString('utf-8');
   } else if (payload?.parts) {
-    const textPart = payload.parts.find(p => p.mimeType === 'text/plain');
-    const htmlPart = payload.parts.find(p => p.mimeType === 'text/html');
+    const textPart = payload.parts.find((p: any) => p.mimeType === 'text/plain');
+    const htmlPart = payload.parts.find((p: any) => p.mimeType === 'text/html');
     const part = textPart || htmlPart;
     if (part?.body?.data) {
-      body = Buffer.from(part.body.data, 'base64').toString('utf-8');
+      body = Buffer.from(part.body.data, 'base64url').toString('utf-8');
     }
   }
-
-  // Strip HTML tags if needed
   body = body.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-  if (body.length > 2000) body = body.slice(0, 2000) + '\n\n... (נחתך — הודעה ארוכה)';
+  if (body.length > 2000) body = body.slice(0, 2000) + '\n\n... (נחתך)';
 
   return `📧 **${subject}**\nמאת: ${from}\nאל: ${to}\n📅 ${date}\n\n${body}`;
 }
 
 export async function gmailSend(to: string, subject: string, body: string): Promise<string> {
-  const auth = requireAuth();
-  const gmail = google.gmail({ version: 'v1', auth });
-
   const message = [
     `To: ${to}`,
     `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,
@@ -94,14 +61,11 @@ export async function gmailSend(to: string, subject: string, body: string): Prom
     '',
     body,
   ].join('\r\n');
-
-  const encoded = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-  await gmail.users.messages.send({
-    userId: 'me',
-    requestBody: { raw: encoded },
+  const raw = Buffer.from(message).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  await googleFetch(`${G}/gmail/v1/users/me/messages/send`, {
+    method: 'POST',
+    body: JSON.stringify({ raw }),
   });
-
   return `✅ מייל נשלח ל-${to}: "${subject}"`;
 }
 
@@ -110,47 +74,32 @@ export async function gmailSearch(query: string): Promise<string> {
 }
 
 export async function gmailMarkRead(messageId: string): Promise<string> {
-  const auth = requireAuth();
-  const gmail = google.gmail({ version: 'v1', auth });
-
-  await gmail.users.messages.modify({
-    userId: 'me',
-    id: messageId,
-    requestBody: { removeLabelIds: ['UNREAD'] },
+  await googleFetch(`${G}/gmail/v1/users/me/messages/${messageId}/modify`, {
+    method: 'POST',
+    body: JSON.stringify({ removeLabelIds: ['UNREAD'] }),
   });
-
   return `✅ הודעה ${messageId} סומנה כנקראה.`;
 }
 
 // ===================== GOOGLE DRIVE =====================
 
 export async function driveListFiles(query?: string, maxResults = 15): Promise<string> {
-  const auth = requireAuth();
-  const drive = google.drive({ version: 'v3', auth });
-
   let q = 'trashed = false';
   if (query) q += ` and name contains '${query.replace(/'/g, "\\'")}'`;
-
-  const res = await drive.files.list({
+  const params = new URLSearchParams({
     q,
-    pageSize: maxResults,
-    fields: 'files(id, name, mimeType, size, modifiedTime, webViewLink, owners)',
+    pageSize: String(maxResults),
+    fields: 'files(id,name,mimeType,size,modifiedTime,webViewLink)',
     orderBy: 'modifiedTime desc',
   });
-
-  if (!res.data.files || res.data.files.length === 0) {
+  const res = await googleFetch(`${G}/drive/v3/files?${params}`);
+  if (!res.files || res.files.length === 0) {
     return query ? `📂 לא נמצאו קבצים עבור: "${query}"` : '📂 Drive ריק.';
   }
-
-  return res.data.files.map(f => {
+  return res.files.map((f: any) => {
     const size = f.size ? `${(Number(f.size) / 1024 / 1024).toFixed(1)}MB` : '';
     const date = f.modifiedTime ? new Date(f.modifiedTime).toLocaleDateString('he-IL') : '';
-    const icon = f.mimeType?.includes('folder') ? '📁' :
-                 f.mimeType?.includes('document') ? '📄' :
-                 f.mimeType?.includes('spreadsheet') ? '📊' :
-                 f.mimeType?.includes('presentation') ? '📽️' :
-                 f.mimeType?.includes('image') ? '🖼️' :
-                 f.mimeType?.includes('pdf') ? '📕' : '📎';
+    const icon = f.mimeType?.includes('folder') ? '📁' : f.mimeType?.includes('document') ? '📄' : f.mimeType?.includes('spreadsheet') ? '📊' : f.mimeType?.includes('image') ? '🖼️' : '📎';
     return `${icon} **${f.name}** ${size ? `(${size})` : ''}\n   ${date} · [פתח](${f.webViewLink || '#'})\n   ID: ${f.id}`;
   }).join('\n\n');
 }
@@ -160,27 +109,16 @@ export async function driveSearch(query: string): Promise<string> {
 }
 
 export async function driveGetFile(fileId: string): Promise<string> {
-  const auth = requireAuth();
-  const drive = google.drive({ version: 'v3', auth });
-
-  const meta = await drive.files.get({
-    fileId,
-    fields: 'id, name, mimeType, size, modifiedTime, webViewLink, description, owners, shared',
-  });
-
-  const f = meta.data;
+  const f = await googleFetch(`${G}/drive/v3/files/${fileId}?fields=id,name,mimeType,size,modifiedTime,webViewLink,shared`);
   const size = f.size ? `${(Number(f.size) / 1024 / 1024).toFixed(2)}MB` : 'N/A';
 
   let content = '';
-  // Try to export text content for Google Docs types
   if (f.mimeType?.includes('document') || f.mimeType?.includes('spreadsheet')) {
     try {
-      const exported = await drive.files.export({
-        fileId,
-        mimeType: 'text/plain',
+      const res = await googleFetch(`${G}/drive/v3/files/${fileId}/export?mimeType=text/plain`, {
+        headers: { Accept: 'text/plain' },
       });
-      content = String(exported.data).slice(0, 3000);
-      if (String(exported.data).length > 3000) content += '\n\n... (נחתך)';
+      content = typeof res === 'string' ? res.slice(0, 3000) : '';
     } catch {}
   }
 
@@ -188,182 +126,124 @@ export async function driveGetFile(fileId: string): Promise<string> {
 }
 
 export async function driveCreateFile(name: string, content: string, mimeType?: string, folderId?: string): Promise<string> {
-  const auth = requireAuth();
-  const drive = google.drive({ version: 'v3', auth });
-
   const isDoc = mimeType === 'application/vnd.google-apps.document';
   const isSheet = mimeType === 'application/vnd.google-apps.spreadsheet';
+  const metadata: any = { name };
+  if (folderId) metadata.parents = [folderId];
+  if (isDoc) metadata.mimeType = 'application/vnd.google-apps.document';
+  if (isSheet) metadata.mimeType = 'application/vnd.google-apps.spreadsheet';
 
-  const fileMetadata: any = { name };
-  if (folderId) fileMetadata.parents = [folderId];
-  if (isDoc) fileMetadata.mimeType = 'application/vnd.google-apps.document';
-  if (isSheet) fileMetadata.mimeType = 'application/vnd.google-apps.spreadsheet';
+  const boundary = '----GoogleDriveBoundary';
+  const uploadMime = isDoc ? 'text/plain' : isSheet ? 'text/csv' : (mimeType || 'text/plain');
+  const multipart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${uploadMime}\r\n\r\n${content}\r\n--${boundary}--`;
 
-  const media = {
-    mimeType: isDoc ? 'text/plain' : isSheet ? 'text/csv' : (mimeType || 'text/plain'),
-    body: content,
-  };
-
-  const res = await drive.files.create({
-    requestBody: fileMetadata,
-    media,
-    fields: 'id, name, webViewLink',
+  const res = await googleFetch(`https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink`, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body: multipart,
   });
-
-  return `✅ קובץ נוצר: **${res.data.name}**\nלינק: ${res.data.webViewLink || 'N/A'}\nID: ${res.data.id}`;
+  return `✅ קובץ נוצר: **${res.name}**\nלינק: ${res.webViewLink || 'N/A'}\nID: ${res.id}`;
 }
 
 export async function driveShareFile(fileId: string, email: string, role = 'reader'): Promise<string> {
-  const auth = requireAuth();
-  const drive = google.drive({ version: 'v3', auth });
-
-  await drive.permissions.create({
-    fileId,
-    requestBody: {
-      type: 'user',
-      role,
-      emailAddress: email,
-    },
+  await googleFetch(`${G}/drive/v3/files/${fileId}/permissions`, {
+    method: 'POST',
+    body: JSON.stringify({ type: 'user', role, emailAddress: email }),
   });
-
   return `✅ הקובץ שותף עם ${email} (${role})`;
 }
 
 // ===================== GOOGLE TASKS =====================
 
 export async function tasksListAll(maxResults = 20): Promise<string> {
-  const auth = requireAuth();
-  const tasks = google.tasks({ version: 'v1', auth });
-
-  // Get task lists
-  const listsRes = await tasks.tasklists.list({ maxResults: 10 });
-  const lists = listsRes.data.items || [];
-
+  const listsRes = await googleFetch(`${G}/tasks/v1/users/@me/lists?maxResults=10`);
+  const lists = listsRes.items || [];
   if (lists.length === 0) return '📋 אין רשימות משימות.';
 
   const results: string[] = [];
-
   for (const list of lists) {
-    const tasksRes = await tasks.tasks.list({
-      tasklist: list.id!,
-      maxResults,
-      showCompleted: false,
-    });
-
-    const items = tasksRes.data.items || [];
+    const tasksRes = await googleFetch(`${G}/tasks/v1/lists/${list.id}/tasks?maxResults=${maxResults}&showCompleted=false`);
+    const items = tasksRes.items || [];
     if (items.length === 0) continue;
-
     results.push(`📋 **${list.title}** (${items.length} משימות)`);
     for (const item of items) {
       const due = item.due ? ` · 📅 ${new Date(item.due).toLocaleDateString('he-IL')}` : '';
-      const status = item.status === 'completed' ? '✅' : '⬜';
-      results.push(`  ${status} ${item.title}${due}\n     ID: ${item.id} (list: ${list.id})`);
+      results.push(`  ⬜ ${item.title}${due}\n     ID: ${item.id} (list: ${list.id})`);
     }
   }
-
   return results.length > 0 ? results.join('\n') : '📋 אין משימות פתוחות.';
 }
 
 export async function tasksAdd(title: string, notes?: string, dueDate?: string, tasklistId?: string): Promise<string> {
-  const auth = requireAuth();
-  const tasksApi = google.tasks({ version: 'v1', auth });
-
-  // Get default task list if not specified
   let listId = tasklistId;
   if (!listId) {
-    const listsRes = await tasksApi.tasklists.list({ maxResults: 1 });
-    listId = listsRes.data.items?.[0]?.id || '@default';
+    const listsRes = await googleFetch(`${G}/tasks/v1/users/@me/lists?maxResults=1`);
+    listId = listsRes.items?.[0]?.id || '@default';
   }
+  const taskBody: any = { title };
+  if (notes) taskBody.notes = notes;
+  if (dueDate) taskBody.due = new Date(dueDate).toISOString();
 
-  const body: any = { title };
-  if (notes) body.notes = notes;
-  if (dueDate) body.due = new Date(dueDate).toISOString();
-
-  const res = await tasksApi.tasks.insert({
-    tasklist: listId,
-    requestBody: body,
+  const res = await googleFetch(`${G}/tasks/v1/lists/${listId}/tasks`, {
+    method: 'POST',
+    body: JSON.stringify(taskBody),
   });
-
-  return `✅ משימה נוצרה: **${res.data.title}**${dueDate ? ` (עד ${new Date(dueDate).toLocaleDateString('he-IL')})` : ''}\nID: ${res.data.id}`;
+  return `✅ משימה נוצרה: **${res.title}**${dueDate ? ` (עד ${new Date(dueDate).toLocaleDateString('he-IL')})` : ''}\nID: ${res.id}`;
 }
 
 export async function tasksComplete(taskId: string, tasklistId?: string): Promise<string> {
-  const auth = requireAuth();
-  const tasksApi = google.tasks({ version: 'v1', auth });
-
   let listId = tasklistId;
   if (!listId) {
-    const listsRes = await tasksApi.tasklists.list({ maxResults: 1 });
-    listId = listsRes.data.items?.[0]?.id || '@default';
+    const listsRes = await googleFetch(`${G}/tasks/v1/users/@me/lists?maxResults=1`);
+    listId = listsRes.items?.[0]?.id || '@default';
   }
-
-  await tasksApi.tasks.patch({
-    tasklist: listId,
-    task: taskId,
-    requestBody: { status: 'completed' },
+  await googleFetch(`${G}/tasks/v1/lists/${listId}/tasks/${taskId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'completed' }),
   });
-
   return `✅ משימה הושלמה!`;
 }
 
 export async function tasksDelete(taskId: string, tasklistId?: string): Promise<string> {
-  const auth = requireAuth();
-  const tasksApi = google.tasks({ version: 'v1', auth });
-
   let listId = tasklistId;
   if (!listId) {
-    const listsRes = await tasksApi.tasklists.list({ maxResults: 1 });
-    listId = listsRes.data.items?.[0]?.id || '@default';
+    const listsRes = await googleFetch(`${G}/tasks/v1/users/@me/lists?maxResults=1`);
+    listId = listsRes.items?.[0]?.id || '@default';
   }
-
-  await tasksApi.tasks.delete({
-    tasklist: listId,
-    task: taskId,
-  });
-
+  await googleFetch(`${G}/tasks/v1/lists/${listId}/tasks/${taskId}`, { method: 'DELETE' });
   return `🗑️ משימה נמחקה.`;
 }
 
-// ===================== GOOGLE CALENDAR (via API) =====================
+// ===================== GOOGLE CALENDAR =====================
 
 export async function gcalListEvents(days = 3, maxResults = 15): Promise<string> {
-  const auth = requireAuth();
-  const calendar = google.calendar({ version: 'v3', auth });
-
   const now = new Date();
-  const end = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-
-  const res = await calendar.events.list({
-    calendarId: 'primary',
+  const end = new Date(now.getTime() + days * 86400000);
+  const params = new URLSearchParams({
     timeMin: now.toISOString(),
     timeMax: end.toISOString(),
-    maxResults,
-    singleEvents: true,
+    maxResults: String(maxResults),
+    singleEvents: 'true',
     orderBy: 'startTime',
   });
-
-  const events = res.data.items || [];
+  const res = await googleFetch(`${G}/calendar/v3/calendars/primary/events?${params}`);
+  const events = res.items || [];
   if (events.length === 0) return `📅 אין אירועים ב-${days} הימים הקרובים.`;
 
-  return events.map(e => {
+  return events.map((e: any) => {
     const start = e.start?.dateTime || e.start?.date || '';
     const startDate = new Date(start);
     const time = e.start?.dateTime
       ? startDate.toLocaleString('he-IL', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
       : startDate.toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'short' }) + ' (כל היום)';
     const location = e.location ? ` 📍 ${e.location}` : '';
-    const desc = e.description ? `\n   ${e.description.slice(0, 100)}` : '';
-    return `📅 **${e.summary || 'ללא כותרת'}**\n   ${time}${location}${desc}\n   ID: ${e.id}`;
+    return `📅 **${e.summary || 'ללא כותרת'}**\n   ${time}${location}\n   ID: ${e.id}`;
   }).join('\n\n');
 }
 
 export async function gcalAddEvent(title: string, startTime: string, endTime?: string, location?: string, description?: string): Promise<string> {
-  const auth = requireAuth();
-  const calendar = google.calendar({ version: 'v3', auth });
-
   const start = new Date(startTime);
-  const end = endTime ? new Date(endTime) : new Date(start.getTime() + 60 * 60 * 1000);
-
+  const end = endTime ? new Date(endTime) : new Date(start.getTime() + 3600000);
   const event: any = {
     summary: title,
     start: { dateTime: start.toISOString(), timeZone: 'Asia/Jerusalem' },
@@ -372,63 +252,40 @@ export async function gcalAddEvent(title: string, startTime: string, endTime?: s
   if (location) event.location = location;
   if (description) event.description = description;
 
-  const res = await calendar.events.insert({
-    calendarId: 'primary',
-    requestBody: event,
+  const res = await googleFetch(`${G}/calendar/v3/calendars/primary/events`, {
+    method: 'POST',
+    body: JSON.stringify(event),
   });
-
   const dateStr = start.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' });
   const timeStr = start.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-
-  return `✅ אירוע נוצר: **${title}**\n${dateStr} ${timeStr}${location ? ` ב${location}` : ''}\nלינק: ${res.data.htmlLink || 'N/A'}`;
+  return `✅ אירוע נוצר: **${title}**\n${dateStr} ${timeStr}${location ? ` ב${location}` : ''}\nלינק: ${res.htmlLink || 'N/A'}`;
 }
 
 export async function gcalDeleteEvent(eventId: string): Promise<string> {
-  const auth = requireAuth();
-  const calendar = google.calendar({ version: 'v3', auth });
-
-  await calendar.events.delete({
-    calendarId: 'primary',
-    eventId,
-  });
-
+  await googleFetch(`${G}/calendar/v3/calendars/primary/events/${eventId}`, { method: 'DELETE' });
   return `🗑️ אירוע נמחק.`;
 }
 
 // ===================== GOOGLE CONTACTS =====================
 
 export async function contactsList(query?: string, maxResults = 20): Promise<string> {
-  const auth = requireAuth();
-  const people = google.people({ version: 'v1', auth });
-
   if (query) {
-    const res = await people.people.searchContacts({
-      query,
-      readMask: 'names,emailAddresses,phoneNumbers',
-      pageSize: maxResults,
-    });
-    const contacts = res.data.results || [];
+    const res = await googleFetch(`https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(query)}&readMask=names,emailAddresses,phoneNumbers&pageSize=${maxResults}`);
+    const contacts = res.results || [];
     if (contacts.length === 0) return `👤 לא נמצאו אנשי קשר עבור: "${query}"`;
-    return contacts.map(c => {
-      const person = c.person;
-      const name = person?.names?.[0]?.displayName || 'ללא שם';
-      const email = person?.emailAddresses?.[0]?.value || '';
-      const phone = person?.phoneNumbers?.[0]?.value || '';
+    return contacts.map((c: any) => {
+      const p = c.person;
+      const name = p?.names?.[0]?.displayName || 'ללא שם';
+      const email = p?.emailAddresses?.[0]?.value || '';
+      const phone = p?.phoneNumbers?.[0]?.value || '';
       return `👤 **${name}**${email ? `\n   📧 ${email}` : ''}${phone ? `\n   📱 ${phone}` : ''}`;
     }).join('\n\n');
   }
 
-  const res = await people.people.connections.list({
-    resourceName: 'people/me',
-    personFields: 'names,emailAddresses,phoneNumbers',
-    pageSize: maxResults,
-    sortOrder: 'LAST_MODIFIED_DESCENDING',
-  });
-
-  const contacts = res.data.connections || [];
+  const res = await googleFetch(`https://people.googleapis.com/v1/people/me/connections?personFields=names,emailAddresses,phoneNumbers&pageSize=${maxResults}&sortOrder=LAST_MODIFIED_DESCENDING`);
+  const contacts = res.connections || [];
   if (contacts.length === 0) return '👤 אין אנשי קשר.';
-
-  return contacts.map(c => {
+  return contacts.map((c: any) => {
     const name = c.names?.[0]?.displayName || 'ללא שם';
     const email = c.emailAddresses?.[0]?.value || '';
     const phone = c.phoneNumbers?.[0]?.value || '';
