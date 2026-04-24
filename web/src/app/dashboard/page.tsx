@@ -96,33 +96,37 @@ export default function DashboardPage() {
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Greeting Header */}
-      <div className="px-5 pt-6 pb-4 bg-gradient-to-b from-[var(--primary)]/10 to-transparent relative">
-        <div className="absolute top-5 left-4 flex items-center gap-1">
-          <button
-            onClick={() => { setShowAlerts(!showAlerts); if (!showAlerts && unreadAlerts > 0) { markAllAlertsRead(); setUnreadAlerts(0); } }}
-            className="relative p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
-          >
-            <Bell size={16} />
-            {unreadAlerts > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
-                {unreadAlerts}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => load(true)}
-            className="p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
-          >
-            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-          </button>
-          <Link href="/settings" className="p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]">
-            <Settings size={16} />
-          </Link>
+      <div className="px-5 pt-5 pb-4 bg-gradient-to-b from-[var(--primary)]/10 to-transparent relative">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-3xl font-bold tracking-tight">{time}</div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { setShowAlerts(!showAlerts); if (!showAlerts && unreadAlerts > 0) { markAllAlertsRead(); setUnreadAlerts(0); } }}
+              className="relative p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
+            >
+              <Bell size={16} />
+              {unreadAlerts > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                  {unreadAlerts}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => load(true)}
+              className="p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]"
+            >
+              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            </button>
+            <Link href="/settings" className="p-2 rounded-xl hover:bg-[var(--muted)] text-[var(--muted-foreground)]">
+              <Settings size={16} />
+            </Link>
+          </div>
         </div>
+        <div className="text-sm text-[var(--muted-foreground)]">{greeting} &middot; {date}</div>
 
         {/* Alerts dropdown */}
         {showAlerts && alerts.length > 0 && (
-          <div className="absolute top-14 left-4 right-4 z-50 rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-xl max-h-64 overflow-y-auto animate-fade-in">
+          <div className="absolute top-16 left-4 right-4 z-50 rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-xl max-h-64 overflow-y-auto animate-fade-in">
             <div className="p-3 border-b border-[var(--border)] text-xs font-semibold flex items-center gap-1.5">
               <AlertCircle size={13} /> התראות חכמות
             </div>
@@ -134,8 +138,6 @@ export default function DashboardPage() {
             ))}
           </div>
         )}
-        <div className="text-3xl font-bold mb-0.5 tracking-tight">{time}</div>
-        <div className="text-sm text-[var(--muted-foreground)]">{greeting} &middot; {date}</div>
       </div>
 
       {/* Status Cards */}
