@@ -263,17 +263,79 @@ echo 'cd ~/ai-agent/server && npm run dev' >> ~/.bashrc
 ai-agent/
 ├── server/           ← Backend (Node.js + TypeScript)
 │   ├── src/
-│   │   ├── server.ts       ← שרת ראשי
-│   │   ├── agent/          ← Claude AI agent
-│   │   ├── tools/          ← 37 כלים (קבצים, SMS, Git...)
-│   │   ├── services/       ← תזכורות, אוטומציות, briefing
+│   │   ├── server.ts       ← שרת ראשי + WebSocket + REST API
+│   │   ├── agent/          ← Claude AI agent + offline commands + local LLM
+│   │   ├── tools/          ← 81 כלים (קבצים, SMS, Git, Google, voice...)
+│   │   ├── services/       ← תזכורות, אוטומציות, גיבוי, voice mode, proactive agent
 │   │   └── observer/       ← ניטור רקע + AI insights
 │   └── .env                ← הגדרות (API key)
-├── web/              ← Frontend (Next.js)
+├── web/              ← Frontend (Next.js + PWA)
+│   ├── public/
+│   │   ├── sw.js           ← Service Worker (offline)
+│   │   └── manifest.json   ← PWA manifest
 │   └── src/
 │       ├── app/            ← דפים (dashboard, chat, files, gallery, settings)
-│       ├── components/     ← קומפוננטות UI
-│       └── lib/            ← API + WebSocket
+│       ├── components/     ← קומפוננטות UI + offline indicator
+│       └── lib/            ← API + WebSocket + message queue
+├── scripts/          ← Termux scripts
+│   ├── boot/               ← auto-start on boot
+│   ├── tasker/             ← Termux:Tasker integration
+│   └── widgets/            ← Termux:Widget shortcuts (Hebrew)
 ├── install.sh        ← סקריפט התקנה
 └── start.sh          ← סקריפט הפעלה
 ```
+
+---
+
+## רשימת יכולות מלאה (81 כלים + 14 פקודות offline)
+
+### כלי AI (81)
+
+| קטגוריה | כלים | כמות |
+|---|---|---|
+| **קבצים** | read_file, write_file, edit_file, delete_file, list_directory, search_files | 6 |
+| **טרמינל** | run_command | 1 |
+| **גלריה** | gallery_list, gallery_organize | 2 |
+| **תקשורת** | send_sms, get_contacts, send_email, send_telegram, make_call, share_content | 6 |
+| **מכשיר** | get_location, take_photo, get_clipboard, get_battery, get_notifications | 5 |
+| **WhatsApp** | whatsapp_messages, whatsapp_reply | 2 |
+| **מדיה** | media_control, media_volume, media_now_playing, record_audio | 4 |
+| **דיאלוג/חיישנים** | show_dialog, get_sensors | 2 |
+| **אפליקציות** | open_app, list_apps | 2 |
+| **לוח שנה** | calendar_list, calendar_add | 2 |
+| **Git** | git_status, git_commit, git_clone | 3 |
+| **אינטרנט** | web_search, web_browse | 2 |
+| **זיכרון** | memory_set, memory_get, memory_list, memory_delete | 4 |
+| **תזכורות** | reminder_add, reminder_list, reminder_complete, reminder_delete | 4 |
+| **אוטומציות** | routine_add, routine_list, routine_toggle, routine_delete | 4 |
+| **קול** | speech_to_text, text_to_speech, voice_chat | 3 |
+| **אחסון** | storage_scan, storage_last_scan, storage_delete_files, storage_clear_cache, storage_delete_empty_folders | 5 |
+| **QR/Briefing** | scan_qr_code, smart_briefing | 2 |
+| **גיבוי** | backup_create, backup_list, backup_restore | 3 |
+| **Google** | google_status, gmail_list, gmail_read, gmail_send, gmail_search, gmail_mark_read, drive_list, drive_search, drive_get, drive_create, drive_share, google_tasks_list, google_tasks_add, google_tasks_complete, google_tasks_delete, gcal_list, gcal_add, gcal_delete, google_contacts | 19 |
+
+### פקודות Offline מהירות (14 — בלי AI)
+סוללה, שעה, התראות, clipboard, פנס, WiFi, צלם, הקלט, חיישנים, מיקום, אנשי קשר, ווליום, אחסון, זיכרון
+
+### שירותי רקע
+- **Observer** — ניטור מכשיר כל 5 דקות + AI digest יומי
+- **Smart Alerts** — סוללה נמוכה, אחסון, ספאם התראות, זיכרון RAM
+- **Proactive Agent** — סיכום בוקר אוטומטי, תזכורת לפגישות קרובות, לילה טוב, תזכורות שעבר זמנן
+- **Reminders** — תזכורות עם התראות אוטומטיות
+- **Routines** — פעולות מתוזמנות (יומי/שבועי/שעתי)
+
+### מצב Offline
+- **פקודות מהירות** — 14 פקודות שעובדות בלי AI
+- **LLM מקומי** — fallback ל-llama.cpp כש-Claude לא זמין
+- **תור הודעות** — הודעות נשמרות ונשלחות אוטומטית כשהחיבור חוזר
+- **PWA** — Service Worker + manifest = UI עובד גם offline
+
+### מצב קולי
+- **voice_chat start** — לולאה רציפה: הקשבה → עיבוד → דיבור
+- **voice_chat stop** / אמירת "עצור" — סיום
+
+### גיבוי ושחזור
+- **backup_create** — גיבוי כל הנתונים (זיכרון, תזכורות, אוטומציות, שיחות, פרופיל)
+- **backup_list** — רשימת גיבויים
+- **backup_restore** — שחזור מגיבוי
+- שמירה פנימית (`~/.ai-agent/backups/`) + חיצונית (`/storage/emulated/0/AI-Agent-Backups/`)
