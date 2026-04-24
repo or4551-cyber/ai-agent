@@ -68,7 +68,17 @@ export async function generateDigest(
       actionable: false,
     }];
   } catch (err) {
-    console.error('[Digest] Error:', (err as Error).message);
-    return [];
+    const msg = (err as Error).message;
+    console.error('[Digest] Error:', msg);
+    // Return error as suggestion so user sees what happened
+    return [{
+      emoji: '⚠️',
+      title: 'שגיאה ביצירת תובנות',
+      description: msg.includes('rate') ? 'Claude API rate limit — נסה שוב בעוד דקה' :
+                   msg.includes('key') || msg.includes('auth') ? 'בעיית API key — בדוק את ANTHROPIC_API_KEY ב-.env' :
+                   msg.includes('timeout') ? 'Timeout — החיבור לקח יותר מדי זמן' :
+                   `שגיאה: ${msg.substring(0, 100)}`,
+      actionable: false,
+    }];
   }
 }

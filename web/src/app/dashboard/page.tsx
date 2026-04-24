@@ -248,8 +248,10 @@ export default function DashboardPage() {
                   const r = await triggerDigest();
                   if (r.suggestions && r.suggestions.length > 0) {
                     setSuggestions(r.suggestions);
+                  } else if (r.error) {
+                    setSuggestions([{ emoji: '⚠️', title: 'שגיאה בניתוח', description: r.error, actionable: false }]);
                   } else {
-                    setSuggestions([{ emoji: '⏳', title: 'אין מספיק נתונים', description: 'הצופה צריך לאסוף עוד דגימות. נסה שוב בעוד כמה דקות.', actionable: false }]);
+                    setSuggestions([{ emoji: '🤷', title: 'לא נמצאו תובנות חדשות', description: 'הצופה ניתח את הנתונים אבל לא זיהה דפוסים מעניינים כרגע. נסה שוב מאוחר יותר.', actionable: false }]);
                   }
                 } catch (err: any) {
                   setSuggestions([{ emoji: '⚠️', title: 'שגיאה', description: err?.message || 'הצופה לא פעיל. ודא ש-ANTHROPIC_API_KEY מוגדר ב-.env', actionable: false }]);

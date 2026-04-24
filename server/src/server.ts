@@ -291,15 +291,22 @@ app.get('/api/observer/analysis', authMiddleware, (_req, res) => {
 
 app.post('/api/observer/digest', authMiddleware, async (_req, res) => {
   if (!observer) {
-    res.status(400).json({ error: 'הצופה לא פעיל. ודא ש-ANTHROPIC_API_KEY מוגדר ב-.env' });
+    res.status(400).json({ suggestions: [], error: 'הצופה לא פעיל. ודא ש-ANTHROPIC_API_KEY מוגדר ב-.env' });
     return;
   }
   try {
+    const snapCount = observer.getSnapshotCount();
+    console.log(`[Observer] Manual digest requested. Snapshots: ${snapCount}`);
+    if (snapCount < 3) {
+      res.json({ suggestions: [], error: `רק ${snapCount} דגימות — צריך לפחות 3` });
+      return;
+    }
     const suggestions = await observer.runDigest();
+    console.log(`[Observer] Digest returned ${suggestions.length} suggestions`);
     res.json({ suggestions });
   } catch (err) {
     console.error('[Observer] Digest error:', (err as Error).message);
-    res.status(500).json({ error: (err as Error).message });
+    res.json({ suggestions: [], error: `שגיאה: ${(err as Error).message}` });
   }
 });
 
