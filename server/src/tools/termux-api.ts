@@ -621,3 +621,142 @@ export async function whatsappReply(contactName: string, message: string): Promi
     return `❌ שגיאה בשליחת הודעה: ${(err as Error).message}`;
   }
 }
+
+// ===== PHONE CALL =====
+
+export async function makeCall(number: string): Promise<string> {
+  const clean = number.replace(/[^\d+*#]/g, '');
+  if (!clean) return '❌ מספר טלפון לא תקין';
+  try {
+    await runCommand(`termux-telephony-call "${clean}"`, undefined, 5000);
+    return `📞 מחייג ל-${clean}...`;
+  } catch (err) {
+    return `❌ שגיאה בחיוג: ${(err as Error).message}`;
+  }
+}
+
+// ===== SHARE CONTENT =====
+
+export async function shareContent(
+  content: string,
+  contentType: 'text' | 'file' = 'text',
+  title?: string
+): Promise<string> {
+  try {
+    if (contentType === 'file') {
+      await runCommand(`termux-share -a send "${content}"`, undefined, 10000);
+      return `📤 נפתח דיאלוג שיתוף לקובץ: ${content}`;
+    }
+    const escaped = content.replace(/"/g, '\\"');
+    const titleFlag = title ? `-t "${title.replace(/"/g, '\\"')}"` : '';
+    await runCommand(`echo "${escaped}" | termux-share ${titleFlag} -a send`, undefined, 10000);
+    return `📤 נפתח דיאלוג שיתוף`;
+  } catch (err) {
+    return `❌ שגיאה בשיתוף: ${(err as Error).message}`;
+  }
+}
+
+// ===== RECORD AUDIO =====
+
+export async function recordAudio(
+  durationSeconds = 10,
+  outputPath?: string
+): Promise<string> {
+  const filePath = outputPath || `/data/data/com.termux/files/home/.ai-agent/recording-${Date.now()}.m4a`;
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true });
+
+  try {
+    // Start recording
+    await runCommand(
+      `termux-microphone-record -f "${filePath}" -l ${Math.min(durationSeconds, 300)} -e aac 2>/dev/null`,
+      undefined, 3000
+    );
+
+    // Wait for the recording duration
+    await new Promise(resolve => setTimeout(resolve, durationSeconds * 1000 + 500));
+
+    // Stop recording
+    await runCommand('termux-microphone-record -q 2>/dev/null', undefined, 3000);
+
+    try {
+      const stat = await fs.stat(filePath);
+      const sizeMB = (stat.size / (1024 * 1024)).toFixed(1);
+      return `🎙️ הקלטה נשמרה: ${filePath} (${sizeMB}MB, ${durationSeconds} שניות)`;
+    } catch {
+      return '❌ ההקלטה נכשלה — הקובץ לא נוצר. ודא שיש הרשאת מיקרופון.';
+    }
+  } catch (err) {
+    // Try to stop recording if started
+    try { await runCommand('termux-microphone-record -q 2>/dev/null', undefined, 2000); } catch {}
+    return `❌ שגיאה בהקלטה: ${(err as Error).message}`;
+  }
+}
+
+// ===== DIALOG & TOAST =====
+
+export async function showDialog(
+  type: 'confirm' | 'text' | 'radio' | 'spinner' | 'toast',
+  title?: string,
+  message?: string,
+  values?: string[]
+): Promise<string> {
+  try {
+    if (type === 'toast') {
+      const text = message || title || '';
+      await runCommand(`termux-toast -g middle "${text.replace(/"/g, '\\"')}"`, undefined, 3000);
+      return `✅ הודעה הוצגה: ${text}`;
+    }
+
+    const titleFlag = title ? `-t "${title.replace(/"/g, '\\"')}"` : '';
+
+    switch (type) {
+      case 'confirm': {
+        const raw = await runCommand(`termux-dialog confirm ${titleFlag} -i "${(message || 'אישור').replace(/"/g, '\\"')}"`, undefined, 30000);
+        const result = JSON.parse(raw);
+        return result.text === 'yes' ? '✅ המשתמש אישר' : '❌ המשתמש ביטל';
+      }
+      case 'text': {
+        const hint = message ? `-i "${message.replace(/"/g, '\\"')}"` : '';
+        const raw = await runCommand(`termux-dialog text ${titleFlag} ${hint}`, undefined, 60000);
+        const result = JSON.parse(raw);
+        return result.text || '(ריק)';
+      }
+      case 'radio':
+      case 'spinner': {
+        if (!values || values.length === 0) return '❌ חסרים ערכים לבחירה';
+        const valStr = values.join(',');
+        const raw = await runCommand(`termux-dialog ${type} ${titleFlag} -v "${valStr}"`, undefined, 30000);
+        const result = JSON.parse(raw);
+        return `בחירה: ${result.text || result.index || '(לא נבחר)'}`;
+      }
+      default:
+        return '❌ סוג דיאלוג לא מוכר';
+    }
+  } catch (err) {
+    return `❌ שגיאה בדיאלוג: ${(err as Error).message}`;
+  }
+}
+
+// ===== SENSORS =====
+
+export async function getSensors(sensorName?: string): Promise<string> {
+  try {
+    if (sensorName) {
+      const raw = await runCommand(`termux-sensor -s "${sensorName}" -n 1 2>/dev/null`, undefined, 8000);
+      return raw.trim() || 'אין נתונים מהחיישן';
+    }
+    // List all sensors
+    const raw = await runCommand('termux-sensor -l 2>/dev/null', undefined, 5000);
+    if (!raw.trim()) return 'לא נמצאו חיישנים. ודא ש-termux-api מותקן.';
+    try {
+      const sensors = JSON.parse(raw);
+      if (Array.isArray(sensors.sensors)) {
+        return `📡 חיישנים זמינים (${sensors.sensors.length}):\n${sensors.sensors.map((s: string) => `• ${s}`).join('\n')}`;
+      }
+    } catch {}
+    return raw.trim();
+  } catch (err) {
+    return `❌ שגיאה בקריאת חיישנים: ${(err as Error).message}`;
+  }
+}

@@ -270,6 +270,26 @@ async function executeToolInternal(
     case 'whatsapp_reply':
       return termuxApi.whatsappReply(input.contact_name as string, input.message as string);
 
+    // Phone Call
+    case 'make_call':
+      return termuxApi.makeCall(input.number as string);
+
+    // Share
+    case 'share_content':
+      return termuxApi.shareContent(input.content as string, (input.content_type as 'text' | 'file') || 'text', input.title as string | undefined);
+
+    // Record Audio
+    case 'record_audio':
+      return termuxApi.recordAudio((input.duration_seconds as number) || 10, input.output_path as string | undefined);
+
+    // Dialog & Toast
+    case 'show_dialog':
+      return termuxApi.showDialog(input.type as 'confirm' | 'text' | 'radio' | 'spinner' | 'toast', input.title as string | undefined, input.message as string | undefined, input.values as string[] | undefined);
+
+    // Sensors
+    case 'get_sensors':
+      return termuxApi.getSensors(input.sensor_name as string | undefined);
+
     // ===== GOOGLE SERVICES =====
     case 'google_status': {
       const status = getGoogleStatus();

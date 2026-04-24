@@ -755,6 +755,85 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== PHONE CALL =====
+  {
+    dangerLevel: 'dangerous',
+    definition: {
+      name: 'make_call',
+      description: 'Make a phone call to a given number. Opens the dialer and initiates the call. Requires user approval.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          number: { type: 'string', description: 'Phone number to call (e.g. "0501234567" or "+972501234567")' },
+        },
+        required: ['number'],
+      },
+    },
+  },
+  // ===== SHARE CONTENT =====
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'share_content',
+      description: 'Share text or a file to other apps via Android share dialog (WhatsApp, Gmail, Telegram, etc).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'Text to share, or file path if content_type is "file"' },
+          content_type: { type: 'string', description: '"text" or "file"', enum: ['text', 'file'] },
+          title: { type: 'string', description: 'Optional title for the share dialog' },
+        },
+        required: ['content'],
+      },
+    },
+  },
+  // ===== RECORD AUDIO =====
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'record_audio',
+      description: 'Record audio from the phone microphone for a given duration. Saves as m4a file.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          duration_seconds: { type: 'number', description: 'Recording duration in seconds (default 10, max 300)' },
+          output_path: { type: 'string', description: 'Optional: custom file path for the recording' },
+        },
+      },
+    },
+  },
+  // ===== DIALOG & TOAST =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'show_dialog',
+      description: 'Show a dialog or toast notification on the phone screen. Types: confirm (yes/no), text (input), radio (single choice), spinner (dropdown), toast (quick message).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', description: 'Dialog type', enum: ['confirm', 'text', 'radio', 'spinner', 'toast'] },
+          title: { type: 'string', description: 'Dialog title' },
+          message: { type: 'string', description: 'Dialog message or hint' },
+          values: { type: 'array', items: { type: 'string' }, description: 'Options for radio/spinner type' },
+        },
+        required: ['type'],
+      },
+    },
+  },
+  // ===== SENSORS =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'get_sensors',
+      description: 'Read phone sensors (accelerometer, gyroscope, proximity, light, etc). Without a sensor name, lists all available sensors.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          sensor_name: { type: 'string', description: 'Specific sensor name to read (e.g. "accelerometer", "proximity"). Leave empty to list all.' },
+        },
+      },
+    },
+  },
   // ===== GOOGLE SERVICES =====
   {
     dangerLevel: 'safe',
