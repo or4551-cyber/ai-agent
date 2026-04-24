@@ -12,6 +12,8 @@ import {
   deleteConversation, generateTitle, Conversation, StoredMessage
 } from '@/lib/chat-storage';
 import { getProactiveAlerts, ProactiveAlert } from '@/lib/api';
+import { enqueueMessage, getQueueSize, dequeueMessage, clearQueue } from '@/lib/message-queue';
+import { WifiOff, Wifi } from 'lucide-react';
 
 interface ToolCall {
   id: string;
@@ -47,6 +49,8 @@ export default function ChatWindow() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [alerts, setAlerts] = useState<ProactiveAlert[]>([]);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
+  const [isOnline, setIsOnline] = useState(true);
+  const [queueSize, setQueueSize] = useState(0);
   const wsRef = useRef<AgentWebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentAssistantId = useRef<string>('');
@@ -54,6 +58,32 @@ export default function ChatWindow() {
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
+
+  // Online/Offline detection + queue flush
+  useEffect(() => {
+    const goOnline = () => { setIsOnline(true); setQueueSize(getQueueSize()); };
+    const goOffline = () => setIsOnline(false);
+    setIsOnline(navigator.onLine);
+    setQueueSize(getQueueSize());
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => { window.removeEventListener('online', goOnline); window.removeEventListener('offline', goOffline); };
+  }, []);
+
+  // Flush queued messages when reconnected
+  useEffect(() => {
+    if (connected && queueSize > 0) {
+      const flush = () => {
+        let msg = dequeueMessage();
+        while (msg) {
+          wsRef.current?.send('chat', { message: msg.message });
+          msg = dequeueMessage();
+        }
+        setQueueSize(0);
+      };
+      setTimeout(flush, 1000);
+    }
+  }, [connected, queueSize]);
 
   // Proactive alerts polling
   useEffect(() => {
@@ -235,6 +265,24 @@ export default function ChatWindow() {
     setIsStreaming(true);
     setTypingStatus('thinking');
 
+    if (!connected) {
+      // Queue message for later if not connected
+      enqueueMessage(message);
+      setQueueSize(getQueueSize());
+      setMessages((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last && last.id === assistantId) {
+          last.content = '📥 ההודעה נשמרה בתור. תישלח אוטומטית כשהחיבור יחזור.';
+        }
+        return updated;
+      });
+      setIsStreaming(false);
+      setTypingStatus('idle');
+      scrollToBottom();
+      return;
+    }
+
     if (images && images.length > 0) {
       wsRef.current?.send('chat', {
         message,
@@ -347,6 +395,15 @@ export default function ChatWindow() {
           </button>
         </div>
       </div>
+
+      {/* Offline / Queue indicator */}
+      {(!isOnline || !connected) && (
+        <div className="flex items-center justify-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-xs">
+          <WifiOff size={12} />
+          <span>{!isOnline ? 'אין חיבור לאינטרנט' : 'לא מחובר לשרת'} — מצב offline פעיל</span>
+          {queueSize > 0 && <span className="px-1.5 py-0.5 rounded-full bg-amber-500/20 text-[10px] font-bold">{queueSize} בתור</span>}
+        </div>
+      )}
 
       {/* History Panel */}
       {showHistory && (
@@ -537,7 +594,7 @@ export default function ChatWindow() {
       {/* Input */}
       <ChatInput
         onSend={handleSend}
-        disabled={!connected}
+        disabled={isStreaming}
         isStreaming={isStreaming}
         alerts={alerts}
         hasMessages={messages.length > 0}

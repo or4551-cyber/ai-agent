@@ -4,6 +4,7 @@ import "./globals.css";
 import Sidebar from "@/components/common/Sidebar";
 import BottomNav from "@/components/common/BottomNav";
 import Providers from "@/components/common/Providers";
+import ServiceWorkerRegistration from "@/components/common/ServiceWorkerRegistration";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,9 +37,11 @@ export default function RootLayout({
         <meta name="theme-color" content="#09090b" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <link rel="manifest" href="/manifest.json" />
       </head>
       <body className="flex flex-col md:flex-row overflow-hidden" style={{ height: '100dvh' }}>
         <Providers>
+          <ServiceWorkerRegistration />
           <Sidebar />
           <main className="flex-1 flex flex-col min-h-0">{children}</main>
           <BottomNav />

@@ -13,6 +13,8 @@ import { ReminderService } from './services/reminders';
 import { RoutineService } from './services/routines';
 import { generateBriefing } from './services/briefing';
 import { UserProfileService } from './services/user-profile';
+import { tryOfflineCommand } from './agent/offline-commands';
+import { LocalLLM } from './agent/local-llm';
 import { StorageScanner } from './services/storage-scanner';
 import { SmartAlertsService } from './services/smart-alerts';
 import { ConversationHistoryService } from './services/conversation-history';
@@ -38,6 +40,8 @@ if (process.env.ANTHROPIC_API_KEY) {
   observer = new ObserverService(process.env.ANTHROPIC_API_KEY);
   observer.start();
 }
+
+const localLLM = new LocalLLM();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3002;
@@ -914,14 +918,45 @@ wss.on('connection', (ws: WebSocket, req) => {
         const images = msg.payload.images as { base64: string; mediaType: string }[] | undefined;
         console.log(`[${connectionId}] User: ${userMessage.substring(0, 100)}${images ? ` [+${images.length} images]` : ''}`);
 
+        // Try offline command first (no AI needed)
+        if (!images) {
+          const offlineResult = tryOfflineCommand(userMessage);
+          if (offlineResult) {
+            try {
+              const result = await offlineResult;
+              if (result.handled) {
+                ws.send(JSON.stringify({ type: 'text_delta', payload: { text: result.response } }));
+                ws.send(JSON.stringify({ type: 'message_done', payload: { text: result.response } }));
+                console.log(`[${connectionId}] Offline command handled`);
+                return;
+              }
+            } catch {}
+          }
+        }
+
         try {
           await agent.processMessage(userMessage, images);
         } catch (err) {
           const errorMsg = (err as Error).message;
           console.error(`[${connectionId}] Agent error:`, errorMsg);
+
+          // Fallback to local LLM if available
+          if (!images && localLLM.isAvailable()) {
+            try {
+              console.log(`[${connectionId}] Falling back to local LLM...`);
+              ws.send(JSON.stringify({ type: 'text_delta', payload: { text: '🔄 Claude לא זמין. משתמש במודל מקומי...\n\n' } }));
+              const localResponse = localLLM.generate(userMessage);
+              ws.send(JSON.stringify({ type: 'text_delta', payload: { text: localResponse } }));
+              ws.send(JSON.stringify({ type: 'message_done', payload: { text: localResponse } }));
+              return;
+            } catch (llmErr) {
+              console.error(`[${connectionId}] Local LLM also failed:`, (llmErr as Error).message);
+            }
+          }
+
           ws.send(JSON.stringify({
             type: 'error',
-            payload: { message: errorMsg },
+            payload: { message: '❌ ' + errorMsg + (localLLM.isAvailable() ? '' : '\n\nטיפ: התקן llama.cpp למצב offline') },
           }));
         }
       } else if (msg.type === 'approval_response') {
