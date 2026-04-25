@@ -89,30 +89,103 @@ export class HealthMonitor {
     console.log(`[HealthMonitor] Sensors found: ${this.availableSensors.length}`);
   }
 
+  // ===== SAMSUNG HEALTH NOTIFICATION SCRAPING =====
+  private samsungHealthCache: { heartRate: number | null; steps: number | null; ts: number } = { heartRate: null, steps: null, ts: 0 };
+
+  private readSamsungHealthNotifications(): void {
+    // Cache for 60 seconds to avoid spamming
+    if (Date.now() - this.samsungHealthCache.ts < 60000 && (this.samsungHealthCache.heartRate || this.samsungHealthCache.steps)) return;
+
+    safe(() => {
+      const raw = execSync('termux-notification-list 2>/dev/null', { timeout: 8000 }).toString();
+      const notifications = JSON.parse(raw);
+      if (!Array.isArray(notifications)) return;
+
+      for (const n of notifications) {
+        const pkg = (n.packageName || '') as string;
+        const title = (n.title || '') as string;
+        const content = (n.content || '') as string;
+        const text = `${title} ${content}`;
+
+        // Samsung Health notifications
+        if (pkg.includes('shealth') || pkg.includes('samsung.health') || pkg.includes('sec.android.app.shealth')) {
+          // Steps: "3,456 צעדים" or "3456 steps" or just a number with comma
+          const stepsMatch = text.match(/(\d[\d,\.]+)\s*(?:צעדים|steps|צעד)/i) || text.match(/(?:צעדים|steps)[:\s]*(\d[\d,\.]+)/i);
+          if (stepsMatch) {
+            const num = parseInt(stepsMatch[1].replace(/[,\.]/g, ''));
+            if (num > 0 && num < 200000) this.samsungHealthCache.steps = num;
+          }
+
+          // Heart rate: "72 bpm" or "דופק: 72" or "72 פעימות"
+          const hrMatch = text.match(/(\d{2,3})\s*(?:bpm|פעימות|דופק)/i) || text.match(/(?:דופק|heart|bpm)[:\s]*(\d{2,3})/i);
+          if (hrMatch) {
+            const num = parseInt(hrMatch[1]);
+            if (num > 30 && num < 220) this.samsungHealthCache.heartRate = num;
+          }
+        }
+      }
+      this.samsungHealthCache.ts = Date.now();
+    }, undefined);
+  }
+
+  // ===== UI AUTOMATOR SCRAPING (Samsung Health app) =====
+  private readSamsungHealthUI(): { heartRate: number | null; steps: number | null } {
+    return safe(() => {
+      // Dump current UI — only useful if Samsung Health is open or was recently
+      const raw = execSync(
+        'uiautomator dump /dev/stdout 2>/dev/null | grep -oP "text=\"[^\"]*\""',
+        { timeout: 10000 }
+      ).toString();
+
+      let hr: number | null = null;
+      let steps: number | null = null;
+
+      // Look for heart rate values
+      const hrMatch = raw.match(/text="(\d{2,3})"[^]*?text="(?:bpm|פעימות|BPM)"/i);
+      if (hrMatch) {
+        const n = parseInt(hrMatch[1]);
+        if (n > 30 && n < 220) hr = n;
+      }
+
+      // Look for step values
+      const stepsMatch = raw.match(/text="([\d,\.]+)"[^]*?text="(?:צעדים|steps|Steps)"/i);
+      if (stepsMatch) {
+        const n = parseInt(stepsMatch[1].replace(/[,\.]/g, ''));
+        if (n >= 0 && n < 200000) steps = n;
+      }
+
+      return { heartRate: hr, steps };
+    }, { heartRate: null, steps: null });
+  }
+
   // ===== HEART RATE =====
   private readHeartRate(): number | null {
-    // Try heart rate sensor directly
+    // 1. Try Samsung Health notifications first (most reliable, non-invasive)
+    this.readSamsungHealthNotifications();
+    if (this.samsungHealthCache.heartRate) return this.samsungHealthCache.heartRate;
+
+    // 2. Try hardware heart rate sensor
     const hrSensor = this.availableSensors.find(s =>
       s.toLowerCase().includes('heart') || s.toLowerCase().includes('hr') || s.toLowerCase().includes('ppg')
     );
 
     if (hrSensor) {
-      return safe(() => {
+      const result = safe(() => {
         const raw = execSync(`termux-sensor -s "${hrSensor}" -n 1 2>/dev/null`, { timeout: 8000 }).toString();
         const data = JSON.parse(raw);
-        // Extract numeric value from sensor reading
         if (data && typeof data === 'object') {
           const values = Object.values(data).flat();
           for (const v of values) {
             const num = typeof v === 'number' ? v : parseFloat(String(v));
-            if (!isNaN(num) && num > 30 && num < 220) return num; // Valid HR range
+            if (!isNaN(num) && num > 30 && num < 220) return num;
           }
         }
         return null;
       }, null);
+      if (result) return result;
     }
 
-    // Try Health Connect / Google Fit via content provider
+    // 3. Try Health Connect / Google Fit content provider
     return safe(() => {
       const raw = execSync(
         'content query --uri content://com.google.android.apps.fitness.sensors/sessions ' +
@@ -126,13 +199,17 @@ export class HealthMonitor {
 
   // ===== STEP COUNT =====
   private readSteps(): number | null {
-    // Try step counter sensor
+    // 1. Try Samsung Health notifications first
+    this.readSamsungHealthNotifications();
+    if (this.samsungHealthCache.steps) return this.samsungHealthCache.steps;
+
+    // 2. Try step counter sensor (some phones have this)
     const stepSensor = this.availableSensors.find(s =>
       s.toLowerCase().includes('step') || s.toLowerCase().includes('pedometer')
     );
 
     if (stepSensor) {
-      return safe(() => {
+      const result = safe(() => {
         const raw = execSync(`termux-sensor -s "${stepSensor}" -n 1 2>/dev/null`, { timeout: 8000 }).toString();
         const data = JSON.parse(raw);
         if (data && typeof data === 'object') {
@@ -144,6 +221,7 @@ export class HealthMonitor {
         }
         return null;
       }, null);
+      if (result !== null) return result;
     }
 
     return null;

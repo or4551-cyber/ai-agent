@@ -416,6 +416,23 @@ app.get('/api/health/sensors', authMiddleware, (_req, res) => {
   res.json({ sensors });
 });
 
+app.get('/api/health/debug', authMiddleware, (_req, res) => {
+  const monitor = proactiveAgent.getHealthMonitor();
+  const status = monitor.getHealthStatus();
+  const sensors = monitor.getAvailableSensors();
+  const readings = monitor.getReadings().slice(-5);
+  const hasSamsungSensors = sensors.some((s: string) => s.toLowerCase().includes('heart') || s.toLowerCase().includes('step') || s.toLowerCase().includes('ppg'));
+  res.json({
+    status,
+    sensorCount: sensors.length,
+    hasSamsungSensors,
+    recentReadings: readings,
+    tip: !status.currentHeartRate && !status.todaySteps
+      ? 'No health data found. Make sure Samsung Health notifications are enabled and the watch is synced.'
+      : 'Health data is being read successfully.',
+  });
+});
+
 app.get('/api/proximity', authMiddleware, (_req, res) => {
   const proximity = proactiveAgent.getDeviceScanner().getProximityStatus();
   res.json(proximity);
