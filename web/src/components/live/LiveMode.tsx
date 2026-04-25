@@ -158,6 +158,7 @@ export default function LiveMode() {
   const wsRef = useRef<AgentWebSocket | null>(null);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const vadRef = useRef<any>(null);
   const activeRef = useRef(false);
   const assistantBufferRef = useRef('');
   const spokenIndexRef = useRef(0); // tracks how much text we've already spoken
@@ -364,12 +365,7 @@ export default function LiveMode() {
     const heVoice = voices.find(v => v.lang.startsWith('he'));
     if (heVoice) utterance.voice = heVoice;
 
-    utterance.onstart = () => {
-      // Start STT in parallel for barge-in detection
-      if (activeRef.current && !recognitionRef.current) {
-        setTimeout(() => startListening(), 100);
-      }
-    };
+    // VAD handles barge-in — no STT during TTS
     utterance.onend = () => processNextChunk();
     utterance.onerror = () => processNextChunk();
 
@@ -450,116 +446,74 @@ export default function LiveMode() {
     setCurrentText('');
   }, []);
 
-  // ===== STT =====
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const SILENCE_MS = 2000; // 2 seconds of silence = end of speech
-
   const startListening = useCallback(() => {
     if (!hasSpeechAPI || !activeRef.current) return;
     if (document.hidden) return;
+    if (ttsSpeakingRef.current) return;
 
     setState('listening');
 
-    // Abort any existing recognition
     try { recognitionRef.current?.abort(); } catch {}
-    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    recognitionRef.current = null;
 
     const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = 'he-IL';
-    recognition.continuous = true;      // Keep listening until we decide to stop
+    recognition.continuous = false;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    let fullTranscript = '';
-    let hasResult = false;
-    let userStartedSpeaking = false;
-
-    const submitTranscript = () => {
-      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
-      const text = fullTranscript.trim();
-      if (!text || !activeRef.current) {
-        return;
-      }
-
-      // Stop recognition while processing
-      try { recognition.abort(); } catch {}
-      recognitionRef.current = null;
-
-      setCurrentText('');
-
-      // Check stop words
-      const lower = text.toLowerCase();
-      const stopWords = ['עצור', 'stop', 'הפסק', 'סטופ', 'ביי', 'סיים'];
-      if (stopWords.some(w => lower.includes(w))) {
-        endSession();
-        return;
-      }
-
-      setTranscript(prev => [...prev, { role: 'user', text }]);
-      setState('thinking');
-      stateBeforeBgRef.current = 'thinking';
-      wsRef.current?.sendMessage(text);
-    };
+    let finalTranscript = '';
 
     recognition.onresult = (event: any) => {
-      // BARGE-IN: user started speaking — stop TTS immediately
-      if (!userStartedSpeaking) {
-        userStartedSpeaking = true;
-        if (ttsSpeakingRef.current || ttsQueueRef.current.length > 0) {
-          cancelTTS();
-        }
-        setState('listening');
-      }
-
       let interim = '';
-      fullTranscript = '';
+      finalTranscript = '';
       for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
-          fullTranscript += event.results[i][0].transcript;
+          finalTranscript += event.results[i][0].transcript;
         } else {
           interim += event.results[i][0].transcript;
         }
       }
-      hasResult = true;
-      setCurrentText(fullTranscript || interim);
-
-      // Reset silence timer on every result
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = setTimeout(() => {
-        submitTranscript();
-      }, SILENCE_MS);
+      setCurrentText(finalTranscript || interim);
     };
 
     recognition.onend = () => {
-      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
-
+      recognitionRef.current = null;
       if (!activeRef.current) return;
       if (document.hidden) { setState('background'); return; }
 
-      // If we had speech, submit it
-      if (hasResult && fullTranscript.trim()) {
-        submitTranscript();
-        return;
-      }
+      const text = finalTranscript.trim();
+      if (text) {
+        setCurrentText('');
 
-      // No speech detected — restart listening
-      if (activeRef.current) {
-        setTimeout(() => startListening(), 200);
+        const lower = text.toLowerCase();
+        const stopWords = ['\u05e2\u05e6\u05d5\u05e8', 'stop', '\u05d4\u05e4\u05e1\u05e7', '\u05e1\u05d8\u05d5\u05e4', '\u05d1\u05d9\u05d9', '\u05e1\u05d9\u05d9\u05dd'];
+        if (stopWords.some(w => lower.includes(w))) {
+          endSession();
+          return;
+        }
+
+        setTranscript(prev => [...prev, { role: 'user', text }]);
+        setState('thinking');
+        stateBeforeBgRef.current = 'thinking';
+        wsRef.current?.sendMessage(text);
+      } else {
+        setTimeout(() => startListening(), 150);
       }
     };
 
     recognition.onerror = (event: any) => {
-      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+      recognitionRef.current = null;
       if (!activeRef.current) return;
       if (document.hidden) { setState('background'); return; }
 
       if (event.error === 'no-speech') {
-        setTimeout(() => startListening(), 300);
+        setTimeout(() => startListening(), 150);
       } else if (event.error === 'aborted' || event.error === 'not-allowed') {
-        // Will resume on visibility change
+        // Will resume on visibility change or VAD trigger
       } else {
-        setTimeout(() => startListening(), 500);
+        setTimeout(() => startListening(), 300);
       }
     };
 
@@ -567,43 +521,74 @@ export default function LiveMode() {
     try {
       recognition.start();
     } catch {
-      setTimeout(() => startListening(), 300);
+      setTimeout(() => startListening(), 200);
     }
-  }, [hasSpeechAPI, cancelTTS]);
+  }, [hasSpeechAPI]);
 
-  // ===== SESSION CONTROL =====
-  const startSession = useCallback(() => {
+  const startVAD = useCallback(async () => {
+    try {
+      const vadModule = await import('@ricky0123/vad-web');
+      const vad = await vadModule.MicVAD.new({
+        onSpeechStart: () => {
+          if (!activeRef.current) return;
+          if (ttsSpeakingRef.current || ttsQueueRef.current.length > 0) {
+            cancelTTS();
+          }
+          if (!recognitionRef.current) {
+            startListening();
+          }
+        },
+        onSpeechEnd: () => {
+          if (!activeRef.current) return;
+          if (recognitionRef.current) {
+            try { recognitionRef.current.stop(); } catch {}
+          }
+        },
+      });
+      vadRef.current = vad;
+      vad.start();
+      console.log('[VAD] Silero VAD initialized');
+    } catch (err) {
+      console.warn('[VAD] Failed to load, using basic mode:', err);
+    }
+  }, [cancelTTS, startListening]);
+
+  const stopVAD = useCallback(() => {
+    if (vadRef.current) {
+      try { vadRef.current.pause(); } catch {}
+      try { vadRef.current.destroy(); } catch {}
+      vadRef.current = null;
+    }
+  }, []);
+
+  const startSession = useCallback(async () => {
     setActive(true);
     activeRef.current = true;
-    setTranscript([{ role: 'system', text: '🎙️ מצב Live פעיל — דבר אליי מכל מקום' }]);
+    setTranscript([{ role: 'system', text: '\ud83c\udf99\ufe0f \u05de\u05e6\u05d1 Live \u05e4\u05e2\u05d9\u05dc \u2014 \u05d3\u05d1\u05e8 \u05d0\u05dc\u05d9\u05d9 \u05de\u05db\u05dc \u05de\u05e7\u05d5\u05dd' }]);
     assistantBufferRef.current = '';
 
-    // Acquire Wake Lock
     requestWakeLock().then(lock => { wakeLockRef.current = lock; });
 
-    // Start keepalive audio (prevents browser from sleeping)
     const audio = createKeepaliveAudio();
     if (audio) {
       audio.play().catch(() => {});
       keepaliveRef.current = audio;
     }
 
-    // DON'T clear WS history — keep full context and memory!
-    // wsRef.current?.clearHistory();
-
-    // Tell server we're in live mode (auto-approve dangerous tools)
     wsRef.current?.send('set_live_mode', { enabled: true });
 
+    await startVAD();
+
     setTimeout(() => startListening(), 300);
-  }, [startListening]);
+  }, [startListening, startVAD]);
 
   const endSession = useCallback(() => {
     setActive(false);
     activeRef.current = false;
     setState('idle');
 
-    // Clear silence timer
-    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+    // Stop VAD
+    stopVAD();
 
     // Stop recognition
     try { recognitionRef.current?.stop(); } catch {}
@@ -650,6 +635,7 @@ export default function LiveMode() {
   useEffect(() => {
     return () => {
       activeRef.current = false;
+      stopVAD();
       try { recognitionRef.current?.abort(); } catch {}
       speechSynthesis.cancel();
       try { wakeLockRef.current?.release(); } catch {}
