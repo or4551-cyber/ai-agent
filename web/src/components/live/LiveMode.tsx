@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Mic, MicOff, Volume2, VolumeX, Sparkles, Phone } from 'lucide-react';
+import { X, Mic, MicOff, Volume2, VolumeX, Sparkles, Phone, Radio } from 'lucide-react';
 import { AgentWebSocket, WSEvent } from '@/lib/websocket';
 
-type LiveState = 'idle' | 'listening' | 'thinking' | 'speaking';
+type LiveState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'background';
 
 function getWsUrl() {
   if (typeof window === 'undefined') return 'ws://localhost:3002/ws';
@@ -14,6 +14,37 @@ function getWsUrl() {
 }
 const AUTH_TOKEN = process.env.NEXT_PUBLIC_AUTH_TOKEN || 'dev-token';
 
+// ===== KEEPALIVE: silent audio to prevent browser from sleeping =====
+function createKeepaliveAudio(): HTMLAudioElement | null {
+  try {
+    const ctx = new AudioContext();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.001; // Nearly silent
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start();
+
+    // Also create a looping silent audio element as fallback
+    const audio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=');
+    audio.loop = true;
+    audio.volume = 0.01;
+    return audio;
+  } catch {
+    return null;
+  }
+}
+
+// ===== WAKE LOCK: prevent screen from turning off =====
+async function requestWakeLock(): Promise<any> {
+  try {
+    if ('wakeLock' in navigator) {
+      return await (navigator as any).wakeLock.request('screen');
+    }
+  } catch {}
+  return null;
+}
+
 // ===== PULSING ORB =====
 function PulsingOrb({ state }: { state: LiveState }) {
   const colors: Record<LiveState, string> = {
@@ -21,6 +52,7 @@ function PulsingOrb({ state }: { state: LiveState }) {
     listening: 'from-violet-500 to-purple-600',
     thinking: 'from-cyan-500 to-blue-600',
     speaking: 'from-emerald-500 to-green-600',
+    background: 'from-amber-500 to-orange-600',
   };
 
   const shadows: Record<LiveState, string> = {
@@ -28,6 +60,7 @@ function PulsingOrb({ state }: { state: LiveState }) {
     listening: 'shadow-violet-500/40',
     thinking: 'shadow-cyan-500/40',
     speaking: 'shadow-emerald-500/40',
+    background: 'shadow-amber-500/40',
   };
 
   const scales: Record<LiveState, string> = {
@@ -35,24 +68,24 @@ function PulsingOrb({ state }: { state: LiveState }) {
     listening: 'scale-110',
     thinking: 'scale-105',
     speaking: 'scale-115',
+    background: 'scale-100',
   };
 
   return (
     <div className="relative flex items-center justify-center">
-      {/* Outer ring pulse */}
       {state !== 'idle' && (
         <>
           <div className={`absolute w-48 h-48 rounded-full bg-gradient-to-br ${colors[state]} opacity-10 animate-ping`} />
           <div className={`absolute w-40 h-40 rounded-full bg-gradient-to-br ${colors[state]} opacity-15 animate-pulse`} />
         </>
       )}
-      {/* Main orb */}
       <div
         className={`w-32 h-32 rounded-full bg-gradient-to-br ${colors[state]} ${shadows[state]} shadow-2xl flex items-center justify-center transition-all duration-500 ${scales[state]}`}
       >
         {state === 'listening' && <Mic size={40} className="text-white animate-pulse" />}
         {state === 'thinking' && <Sparkles size={40} className="text-white animate-spin" style={{ animationDuration: '3s' }} />}
         {state === 'speaking' && <Volume2 size={40} className="text-white animate-pulse" />}
+        {state === 'background' && <Radio size={40} className="text-white animate-pulse" />}
         {state === 'idle' && <Mic size={40} className="text-zinc-400" />}
       </div>
     </div>
@@ -60,7 +93,7 @@ function PulsingOrb({ state }: { state: LiveState }) {
 }
 
 // ===== TRANSCRIPT DISPLAY =====
-function TranscriptDisplay({ lines }: { lines: { role: 'user' | 'assistant'; text: string }[] }) {
+function TranscriptDisplay({ lines }: { lines: { role: 'user' | 'assistant' | 'system'; text: string }[] }) {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -74,12 +107,16 @@ function TranscriptDisplay({ lines }: { lines: { role: 'user' | 'assistant'; tex
           className={`text-sm leading-relaxed animate-fade-in ${
             line.role === 'user'
               ? 'text-zinc-300 text-right'
+              : line.role === 'system'
+              ? 'text-amber-400/70 text-center text-xs'
               : 'text-white font-medium text-right'
           }`}
         >
-          <span className="text-[10px] text-zinc-500 block mb-0.5">
-            {line.role === 'user' ? 'אתה' : 'Merlin'}
-          </span>
+          {line.role !== 'system' && (
+            <span className="text-[10px] text-zinc-500 block mb-0.5">
+              {line.role === 'user' ? 'אתה' : 'Merlin'}
+            </span>
+          )}
           {line.text}
         </div>
       ))}
@@ -89,12 +126,13 @@ function TranscriptDisplay({ lines }: { lines: { role: 'user' | 'assistant'; tex
 }
 
 // ===== STATUS TEXT =====
-function StatusText({ state }: { state: LiveState }) {
+function StatusText({ state, backgroundSeconds }: { state: LiveState; backgroundSeconds: number }) {
   const labels: Record<LiveState, string> = {
     idle: 'לחץ על המיקרופון להתחיל',
     listening: 'מקשיב...',
     thinking: 'חושב...',
     speaking: 'מדבר...',
+    background: `פעיל ברקע · ${Math.floor(backgroundSeconds / 60)}:${String(backgroundSeconds % 60).padStart(2, '0')}`,
   };
   return (
     <div className="text-center text-sm text-zinc-400 font-medium">
@@ -109,19 +147,26 @@ export default function LiveMode() {
   const [state, setState] = useState<LiveState>('idle');
   const [active, setActive] = useState(false);
   const [muted, setMuted] = useState(false);
-  const [transcript, setTranscript] = useState<{ role: 'user' | 'assistant'; text: string }[]>([]);
+  const [transcript, setTranscript] = useState<{ role: 'user' | 'assistant' | 'system'; text: string }[]>([]);
   const [currentText, setCurrentText] = useState('');
+  const [sessionDuration, setSessionDuration] = useState(0);
+  const [bgSeconds, setBgSeconds] = useState(0);
 
   const wsRef = useRef<AgentWebSocket | null>(null);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
   const activeRef = useRef(false);
   const assistantBufferRef = useRef('');
+  const wakeLockRef = useRef<any>(null);
+  const keepaliveRef = useRef<HTMLAudioElement | null>(null);
+  const stateBeforeBgRef = useRef<LiveState>('listening');
+  const sessionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingResumeRef = useRef(false);
 
   const hasSpeechAPI = typeof window !== 'undefined' &&
     ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
 
-  // Connect WebSocket
+  // ===== CONNECT WEBSOCKET =====
   useEffect(() => {
     const selectedModel = typeof window !== 'undefined'
       ? localStorage.getItem('ai_model') || 'claude-sonnet-4-20250514'
@@ -139,7 +184,6 @@ export default function LiveMode() {
       const fullResponse = assistantBufferRef.current;
       if (fullResponse.trim()) {
         setTranscript(prev => [...prev, { role: 'assistant', text: fullResponse.trim() }]);
-        // Speak the response
         speakText(fullResponse.trim());
       }
       assistantBufferRef.current = '';
@@ -147,7 +191,11 @@ export default function LiveMode() {
     });
 
     ws.on('error', () => {
-      setState('idle');
+      // Don't stop the session on error — just resume listening
+      if (activeRef.current) {
+        setState('listening');
+        setTimeout(() => startListening(), 500);
+      }
     });
 
     ws.connect();
@@ -158,17 +206,76 @@ export default function LiveMode() {
     };
   }, []);
 
+  // ===== VISIBILITY CHANGE: auto-resume on return =====
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (!activeRef.current) return;
+
+      if (document.hidden) {
+        // Going to background — save state
+        stateBeforeBgRef.current = state === 'idle' ? 'listening' : state;
+        setState('background');
+        // Stop STT (browser will kill it anyway)
+        try { recognitionRef.current?.abort(); } catch {}
+        recognitionRef.current = null;
+      } else {
+        // Coming back! Resume immediately
+        pendingResumeRef.current = true;
+        setTranscript(prev => [...prev, { role: 'system', text: '🔄 חזרתי — ממשיך להקשיב...' }]);
+
+        // Re-acquire wake lock (it gets released on hide)
+        requestWakeLock().then(lock => { wakeLockRef.current = lock; });
+
+        // Resume based on what was happening
+        const prevState = stateBeforeBgRef.current;
+        if (prevState === 'thinking') {
+          // Agent was processing — just wait for message_done
+          setState('thinking');
+        } else {
+          // Resume listening
+          setState('listening');
+          setTimeout(() => startListening(), 400);
+        }
+        pendingResumeRef.current = false;
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [state]);
+
+  // ===== SESSION TIMER =====
+  useEffect(() => {
+    if (active) {
+      setSessionDuration(0);
+      setBgSeconds(0);
+      sessionTimerRef.current = setInterval(() => {
+        setSessionDuration(prev => prev + 1);
+        if (document.hidden) setBgSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      if (sessionTimerRef.current) {
+        clearInterval(sessionTimerRef.current);
+        sessionTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (sessionTimerRef.current) clearInterval(sessionTimerRef.current);
+    };
+  }, [active]);
+
   // ===== TTS =====
   const speakText = useCallback((text: string) => {
     if (muted) {
-      // Skip TTS, go back to listening
-      if (activeRef.current) startListening();
+      if (activeRef.current) {
+        setState('listening');
+        setTimeout(() => startListening(), 200);
+      }
       return;
     }
 
     setState('speaking');
 
-    // Clean text for TTS
     const clean = text
       .replace(/[#*_`~\[\]()]/g, '')
       .replace(/\n+/g, '. ')
@@ -180,33 +287,43 @@ export default function LiveMode() {
     utterance.rate = 1.05;
     utterance.pitch = 1;
 
-    // Pick Hebrew voice if available
     const voices = speechSynthesis.getVoices();
     const heVoice = voices.find(v => v.lang.startsWith('he'));
     if (heVoice) utterance.voice = heVoice;
 
     utterance.onend = () => {
-      setState(activeRef.current ? 'listening' : 'idle');
       if (activeRef.current) {
+        setState('listening');
         setTimeout(() => startListening(), 300);
+      } else {
+        setState('idle');
       }
     };
 
     utterance.onerror = () => {
-      setState(activeRef.current ? 'listening' : 'idle');
-      if (activeRef.current) startListening();
+      if (activeRef.current) {
+        setState('listening');
+        setTimeout(() => startListening(), 300);
+      } else {
+        setState('idle');
+      }
     };
 
     synthRef.current = utterance;
-    speechSynthesis.cancel(); // Clear queue
+    speechSynthesis.cancel();
     speechSynthesis.speak(utterance);
   }, [muted]);
 
   // ===== STT =====
   const startListening = useCallback(() => {
     if (!hasSpeechAPI || !activeRef.current) return;
+    // Don't start if page is hidden
+    if (document.hidden) return;
 
     setState('listening');
+
+    // Abort any existing recognition
+    try { recognitionRef.current?.abort(); } catch {}
 
     const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     const recognition = new SpeechRecognition();
@@ -236,8 +353,15 @@ export default function LiveMode() {
       const text = finalTranscript.trim();
       setCurrentText('');
 
+      if (!activeRef.current) return;
+
+      // If page went to background during recognition
+      if (document.hidden) {
+        setState('background');
+        return;
+      }
+
       if (!text || !hasResult) {
-        // No speech, retry
         if (activeRef.current) {
           setTimeout(() => startListening(), 500);
         }
@@ -252,39 +376,58 @@ export default function LiveMode() {
         return;
       }
 
-      // Add to transcript and send to agent
       setTranscript(prev => [...prev, { role: 'user', text }]);
       setState('thinking');
+      stateBeforeBgRef.current = 'thinking';
       wsRef.current?.sendMessage(text);
     };
 
     recognition.onerror = (event: any) => {
-      if (event.error === 'no-speech' && activeRef.current) {
+      if (!activeRef.current) return;
+
+      if (document.hidden) {
+        setState('background');
+        return;
+      }
+
+      if (event.error === 'no-speech') {
         setTimeout(() => startListening(), 500);
-      } else if (event.error === 'aborted') {
-        // Intentional abort, do nothing
+      } else if (event.error === 'aborted' || event.error === 'not-allowed') {
+        // Page went to background or permission issue — will resume on visibility change
       } else {
-        if (activeRef.current) {
-          setTimeout(() => startListening(), 1000);
-        }
+        setTimeout(() => startListening(), 1000);
       }
     };
 
     recognitionRef.current = recognition;
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      // Already started or other error — retry
+      setTimeout(() => startListening(), 500);
+    }
   }, [hasSpeechAPI]);
 
   // ===== SESSION CONTROL =====
   const startSession = useCallback(() => {
     setActive(true);
     activeRef.current = true;
-    setTranscript([]);
+    setTranscript([{ role: 'system', text: '🎙️ מצב Live פעיל — דבר אליי מכל מקום' }]);
     assistantBufferRef.current = '';
 
-    // Clear WS history for fresh context
-    wsRef.current?.clearHistory();
+    // Acquire Wake Lock
+    requestWakeLock().then(lock => { wakeLockRef.current = lock; });
 
-    // Small delay then start listening
+    // Start keepalive audio (prevents browser from sleeping)
+    const audio = createKeepaliveAudio();
+    if (audio) {
+      audio.play().catch(() => {});
+      keepaliveRef.current = audio;
+    }
+
+    // DON'T clear WS history — keep full context and memory!
+    // wsRef.current?.clearHistory();
+
     setTimeout(() => startListening(), 300);
   }, [startListening]);
 
@@ -294,22 +437,33 @@ export default function LiveMode() {
     setState('idle');
 
     // Stop recognition
-    recognitionRef.current?.abort();
+    try { recognitionRef.current?.abort(); } catch {}
     recognitionRef.current = null;
 
     // Stop TTS
     speechSynthesis.cancel();
-  }, []);
+
+    // Release Wake Lock
+    try { wakeLockRef.current?.release(); } catch {}
+    wakeLockRef.current = null;
+
+    // Stop keepalive
+    try {
+      keepaliveRef.current?.pause();
+      keepaliveRef.current = null;
+    } catch {}
+
+    setTranscript(prev => [...prev, {
+      role: 'system',
+      text: `✅ סיום — ${Math.floor(sessionDuration / 60)} דק', ${transcript.filter(t => t.role === 'user').length} פקודות`
+    }]);
+  }, [sessionDuration, transcript]);
 
   const toggleSession = () => {
-    if (active) {
-      endSession();
-    } else {
-      startSession();
-    }
+    if (active) endSession();
+    else startSession();
   };
 
-  // Interrupt — stop TTS and re-listen
   const interrupt = () => {
     speechSynthesis.cancel();
     assistantBufferRef.current = '';
@@ -324,10 +478,14 @@ export default function LiveMode() {
   useEffect(() => {
     return () => {
       activeRef.current = false;
-      recognitionRef.current?.abort();
+      try { recognitionRef.current?.abort(); } catch {}
       speechSynthesis.cancel();
+      try { wakeLockRef.current?.release(); } catch {}
+      try { keepaliveRef.current?.pause(); } catch {}
     };
   }, []);
+
+  const formatDuration = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   return (
     <div className="fixed inset-0 z-50 bg-gradient-to-b from-zinc-950 via-zinc-900 to-zinc-950 flex flex-col">
@@ -339,9 +497,15 @@ export default function LiveMode() {
         >
           <X size={20} />
         </button>
-        <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-[var(--primary)]" />
-          <span className="text-sm font-semibold text-white">Merlin Live</span>
+        <div className="flex flex-col items-center">
+          <div className="flex items-center gap-2">
+            <Sparkles size={16} className="text-[var(--primary)]" />
+            <span className="text-sm font-semibold text-white">Merlin Live</span>
+            {active && <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />}
+          </div>
+          {active && (
+            <span className="text-[10px] text-zinc-500 tabular-nums">{formatDuration(sessionDuration)}</span>
+          )}
         </div>
         <button
           onClick={() => setMuted(!muted)}
@@ -353,21 +517,27 @@ export default function LiveMode() {
         </button>
       </div>
 
+      {/* Background mode banner */}
+      {state === 'background' && (
+        <div className="mx-5 mb-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs text-center animate-pulse">
+          ⏳ Merlin פעיל ברקע — חזור לחלון כדי להמשיך לדבר
+        </div>
+      )}
+
       {/* Transcript */}
       <TranscriptDisplay lines={transcript} />
 
       {/* Current streaming text */}
       {currentText && (
-        <div className="px-6 py-2 text-sm text-zinc-500 text-right animate-fade-in truncate">
-          {currentText.substring(0, 100)}...
+        <div className="px-6 py-2 text-sm text-zinc-500 text-right animate-fade-in">
+          {currentText.length > 150 ? currentText.substring(0, 150) + '...' : currentText}
         </div>
       )}
 
       {/* Orb + Controls */}
       <div className="flex flex-col items-center gap-6 pb-12 pt-6 shrink-0">
-        <StatusText state={state} />
+        <StatusText state={state} backgroundSeconds={bgSeconds} />
 
-        {/* Tap orb to interrupt when speaking */}
         <button
           onClick={state === 'speaking' ? interrupt : toggleSession}
           className="focus:outline-none active:scale-95 transition-transform"
