@@ -44,7 +44,7 @@ export async function generateDigest(
 
   try {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514', // Use same model as main agent
+      model: 'claude-haiku-4-5-20251001', // Haiku for digest (cheap, fast)
       max_tokens: 1024,
       system: DIGEST_PROMPT,
       messages: [{ role: 'user', content: statsText }],

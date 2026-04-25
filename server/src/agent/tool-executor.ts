@@ -7,27 +7,24 @@ import { sendEmail } from '../tools/email';
 import { sendTelegram } from '../tools/telegram';
 import * as git from '../tools/git';
 import { webBrowse, webSearch } from '../tools/web-browse';
-import { AgentMemory } from './memory';
-import { ReminderService } from '../services/reminders';
-import { RoutineService } from '../services/routines';
-import { StorageScanner } from '../services/storage-scanner';
 import { speechToText, textToSpeech } from '../tools/voice';
 import { getGoogleStatus } from '../tools/google-auth';
 import * as googleServices from '../tools/google-services';
 import { VoiceModeService } from '../services/voice-mode';
-import { BackupService } from '../services/backup';
 import { getPluginManager } from '../tools/definitions';
 import { searchCatalog, getCatalogEntry, catalogToString } from '../services/plugin-catalog';
 import * as uiAuto from '../tools/ui-automator';
-import { FavoritesService, FavoriteType, VipContact, QuickShortcut, FavoriteApp, FavoriteLocation } from '../services/favorites';
+import { FavoriteType, VipContact, QuickShortcut, FavoriteApp, FavoriteLocation } from '../services/favorites';
+import {
+  agentMemory as memory,
+  reminderService,
+  routineService,
+  storageScanner,
+  backupService,
+  favoritesService,
+} from '../services/registry';
 
-const memory = new AgentMemory();
-const reminderService = new ReminderService();
-const routineService = new RoutineService();
-const storageScanner = new StorageScanner();
-const backupService = new BackupService();
 let globalVoiceMode: VoiceModeService | null = null;
-const favoritesService = new FavoritesService();
 
 export interface ExecutionResult {
   output: string;
@@ -44,6 +41,24 @@ interface HealingRule {
 // Error memory: remember what worked so we don't waste time retrying
 const errorMemory: Map<string, { fix: string; timestamp: number }> = new Map();
 const ERROR_MEMORY_TTL = 24 * 60 * 60 * 1000; // 24h
+const ERROR_MEMORY_MAX_ENTRIES = 500;
+
+function pruneErrorMemory(): void {
+  const now = Date.now();
+  // Remove expired
+  for (const [k, v] of errorMemory.entries()) {
+    if (now - v.timestamp > ERROR_MEMORY_TTL) errorMemory.delete(k);
+  }
+  // Cap size — drop oldest if too big
+  if (errorMemory.size > ERROR_MEMORY_MAX_ENTRIES) {
+    const entries = [...errorMemory.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const toRemove = entries.slice(0, entries.length - ERROR_MEMORY_MAX_ENTRIES);
+    for (const [k] of toRemove) errorMemory.delete(k);
+  }
+}
+
+// Periodic cleanup
+setInterval(pruneErrorMemory, 60 * 60 * 1000).unref?.();
 
 function getErrorKey(toolName: string, errorMsg: string): string {
   // Normalize error to group similar ones

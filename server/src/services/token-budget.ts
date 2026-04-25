@@ -75,9 +75,82 @@ interface HistoryMessage {
   content: string | any[];
 }
 
+// Anthropic API requires that any assistant message containing tool_use blocks
+// is IMMEDIATELY followed by a user message containing matching tool_result blocks.
+// Cutting in the middle of such a pair causes 400 invalid_request_error.
+function startsWithToolResult(msg: HistoryMessage): boolean {
+  if (msg.role !== 'user' || !Array.isArray(msg.content)) return false;
+  return msg.content.some((b: any) => b && b.type === 'tool_result');
+}
+
+function endsWithToolUse(msg: HistoryMessage): boolean {
+  if (msg.role !== 'assistant' || !Array.isArray(msg.content)) return false;
+  return msg.content.some((b: any) => b && b.type === 'tool_use');
+}
+
+/**
+ * Adjust slice start so we never break a tool_use/tool_result pair.
+ * If recentMessages starts with a tool_result, we must include the matching
+ * tool_use assistant message before it. We walk backwards until we find
+ * a clean cut point.
+ */
+function findSafeCutPoint(messages: HistoryMessage[], desiredStart: number): number {
+  let cut = Math.max(0, Math.min(desiredStart, messages.length));
+  // If the first message at the cut is a tool_result, walk backwards
+  while (cut > 0 && cut < messages.length && startsWithToolResult(messages[cut])) {
+    cut--;
+  }
+  // If cut now lands on an assistant message ending with tool_use,
+  // walk one more back so the cut is BEFORE the assistant message
+  // (otherwise we'd have an orphaned tool_use without history context)
+  // Actually no — tool_use as the first message is fine, only tool_result is the issue.
+  // Just ensure first kept message is not a tool_result.
+  return cut;
+}
+
+/**
+ * Strip messages that contain ONLY tool_use or ONLY tool_result blocks
+ * but have no surrounding pair. Used as last resort.
+ */
+export function stripOrphanedTools(messages: HistoryMessage[]): HistoryMessage[] {
+  return stripOrphanedToolBlocks(messages);
+}
+
+function stripOrphanedToolBlocks(messages: HistoryMessage[]): HistoryMessage[] {
+  const result: HistoryMessage[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (startsWithToolResult(m)) {
+      // tool_result must follow assistant tool_use; if previous is missing/wrong, skip
+      const prev = result[result.length - 1];
+      if (!prev || !endsWithToolUse(prev)) continue;
+    }
+    if (endsWithToolUse(m)) {
+      // tool_use must be followed by tool_result; check if next message has it
+      const next = messages[i + 1];
+      if (!next || !startsWithToolResult(next)) {
+        // Convert to text-only assistant message (drop tool_use blocks)
+        if (Array.isArray(m.content)) {
+          const textOnly = m.content
+            .filter((b: any) => b && b.type === 'text')
+            .map((b: any) => b.text)
+            .join('');
+          if (textOnly.trim()) {
+            result.push({ role: 'assistant', content: textOnly });
+          }
+          continue;
+        }
+      }
+    }
+    result.push(m);
+  }
+  return result;
+}
+
 /**
  * Trim conversation history to fit within token budget.
- * Strategy: keep first message (context) + last N messages, summarize middle.
+ * Strategy: keep last N messages, but never cut a tool_use/tool_result pair.
+ * Older messages get a brief text summary.
  */
 export function trimHistory(
   messages: HistoryMessage[],
@@ -97,13 +170,14 @@ export function trimHistory(
     return { messages, trimmed: false, summary: null };
   }
 
-  // Keep the last N messages (most relevant)
-  const recentMessages = messages.slice(-keepLast);
+  // Find a safe cut point that preserves tool_use/tool_result pairs
+  const desiredStart = Math.max(0, messages.length - keepLast);
+  const safeStart = findSafeCutPoint(messages, desiredStart);
+  const recentMessages = stripOrphanedToolBlocks(messages.slice(safeStart));
+  const olderMessages = messages.slice(0, safeStart);
 
-  // Summarize the older messages into a single context message
-  const olderMessages = messages.slice(0, -keepLast);
   if (olderMessages.length === 0) {
-    // Even recent messages are too many — truncate content
+    // Even recent messages are too many — truncate but preserve tool pairs
     return { messages: truncateMessages(recentMessages, maxTokens), trimmed: true, summary: null };
   }
 
@@ -113,7 +187,14 @@ export function trimHistory(
     content: `[סיכום שיחה קודמת: ${summaryText}]`,
   };
 
-  const result = [summaryMessage, ...recentMessages];
+  // If recent starts with a tool_result, the summary message would break the pair too.
+  // Drop the summary in that edge case.
+  let result: HistoryMessage[];
+  if (recentMessages.length > 0 && startsWithToolResult(recentMessages[0])) {
+    result = recentMessages;
+  } else {
+    result = [summaryMessage, ...recentMessages];
+  }
 
   // Verify we're within budget now
   let newTotal = 0;
@@ -127,6 +208,25 @@ export function trimHistory(
   }
 
   return { messages: result, trimmed: true, summary: summaryText };
+}
+
+/**
+ * Validate that a message array is safe to send to Anthropic API.
+ * Returns true if every tool_use has a matching tool_result and vice versa.
+ */
+export function validateToolPairing(messages: HistoryMessage[]): boolean {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (endsWithToolUse(m)) {
+      const next = messages[i + 1];
+      if (!next || !startsWithToolResult(next)) return false;
+    }
+    if (startsWithToolResult(m)) {
+      const prev = messages[i - 1];
+      if (!prev || !endsWithToolUse(prev)) return false;
+    }
+  }
+  return true;
 }
 
 function createQuickSummary(messages: HistoryMessage[]): string {
@@ -154,7 +254,12 @@ function truncateMessages(messages: HistoryMessage[], maxTokens: number): Histor
     total += tokens;
   }
 
-  return result;
+  // Ensure we don't start with an orphaned tool_result
+  while (result.length > 0 && startsWithToolResult(result[0])) {
+    result.shift();
+  }
+
+  return stripOrphanedToolBlocks(result);
 }
 
 export { DEFAULT_CONFIG };

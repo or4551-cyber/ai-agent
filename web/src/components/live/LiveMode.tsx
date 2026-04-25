@@ -174,8 +174,8 @@ export default function LiveMode() {
   // ===== CONNECT WEBSOCKET =====
   useEffect(() => {
     const selectedModel = typeof window !== 'undefined'
-      ? localStorage.getItem('ai_model') || 'claude-sonnet-4-20250514'
-      : 'claude-sonnet-4-20250514';
+      ? localStorage.getItem('ai_model') || 'claude-sonnet-4-6'
+      : 'claude-sonnet-4-6';
     const wsUrl = `${getWsUrl()}?model=${encodeURIComponent(selectedModel)}`;
     const ws = new AgentWebSocket(wsUrl, AUTH_TOKEN);
 

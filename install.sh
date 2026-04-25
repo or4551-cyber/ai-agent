@@ -49,6 +49,14 @@ npm install
 # 6. Setup .env file
 if [ ! -f ".env" ]; then
   cp .env.example .env
+  # Auto-generate a random AUTH_TOKEN
+  RANDOM_TOKEN=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))" 2>/dev/null || \
+                 head -c 32 /dev/urandom | xxd -p -c 32 2>/dev/null || \
+                 date +%s%N | sha256sum | head -c 64)
+  if [ -n "$RANDOM_TOKEN" ]; then
+    sed -i "s|AUTH_TOKEN=CHANGE_ME_TO_A_RANDOM_STRING|AUTH_TOKEN=$RANDOM_TOKEN|" .env
+    echo "🔐 Generated random AUTH_TOKEN"
+  fi
   echo ""
   echo "⚠️  Edit your .env file:"
   echo "    nano $PROJECT_DIR/server/.env"

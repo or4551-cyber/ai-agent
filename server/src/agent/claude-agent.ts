@@ -9,7 +9,8 @@ import { ConversationLearner } from '../services/conversation-learner';
 import { LocalLLM } from './local-llm';
 import { FavoritesService } from '../services/favorites';
 import { PersonalityEngine } from '../services/personality-engine';
-import { estimateTokens, trimHistory, trimSystemContext } from '../services/token-budget';
+import { estimateTokens, trimHistory, trimSystemContext, validateToolPairing, stripOrphanedTools } from '../services/token-budget';
+import { agentMemory, userProfileService, favoritesService } from '../services/registry';
 
 // Patterns that indicate a simple query answerable by local LLM (no tools needed)
 const LOCAL_LLM_PATTERNS = [
@@ -32,7 +33,7 @@ const HAIKU_PATTERNS = [
   /^(תן לי רעיון|suggest|הצע)/i,
   /^(תתרגם|translate|תרגם)/i,
 ];
-const HAIKU_MODEL = 'claude-3-5-haiku-20241022';
+const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 // Patterns that demand the strongest model (complex reasoning, self-repair)
 const POWER_PATTERNS = [
@@ -72,14 +73,17 @@ export class ClaudeAgent {
 
   // Pricing per million tokens
   private static PRICING: Record<string, { input: number; output: number }> = {
+    'claude-sonnet-4-6': { input: 3, output: 15 },
     'claude-sonnet-4-20250514': { input: 3, output: 15 },
     'claude-3-5-sonnet-20241022': { input: 3, output: 15 },
+    'claude-haiku-4-5-20251001': { input: 1, output: 5 },
     'claude-3-5-haiku-20241022': { input: 0.80, output: 4 },
+    'claude-opus-4-7': { input: 15, output: 75 },
     'claude-opus-4-20250514': { input: 15, output: 75 },
   };
 
-  // Strongest available model (upgrade to opus when available)
-  private static POWER_MODEL = 'claude-sonnet-4-20250514';
+  // Strongest available model — Opus 4.7 for hard tasks
+  private static POWER_MODEL = 'claude-opus-4-7';
 
   private localLLM: LocalLLM;
   private favorites: FavoritesService;
@@ -90,19 +94,20 @@ export class ClaudeAgent {
   constructor(
     apiKey: string,
     onEvent: (event: WSResponse) => void,
-    model = 'claude-sonnet-4-20250514'
+    model = 'claude-sonnet-4-6'
   ) {
     this.client = new Anthropic({ apiKey });
     this.model = model;
     this.onEvent = onEvent;
-    this.memory = new AgentMemory();
-    this.userProfile = new UserProfileService();
+    // Use shared singletons — avoids duplicate state and disk reads
+    this.memory = agentMemory;
+    this.userProfile = userProfileService;
     this.conversationId = `conv-${Date.now()}`;
     this.learner = new ConversationLearner(apiKey, this.userProfile);
     this.localLLM = new LocalLLM();
-    this.favorites = new FavoritesService();
+    this.favorites = favoritesService;
     this.personality = new PersonalityEngine(apiKey);
-    
+
     // Record that user is active
     this.userProfile.recordActivity();
   }
@@ -194,6 +199,9 @@ export class ClaudeAgent {
   ): Promise<string> {
     const model = activeModel || this.model;
 
+    // Snapshot history length so we can roll back cleanly on hard failure
+    const historySnapshotLength = this.conversationHistory.length;
+
     // Build user content — text only or multimodal with images
     let userContent: string | ContentBlock[];
     if (images && images.length > 0) {
@@ -230,8 +238,23 @@ export class ClaudeAgent {
       this.conversationHistory = trimmedHistory;
     }
 
+    // === SAFETY: validate tool_use/tool_result pairing before sending ===
+    if (!validateToolPairing(this.conversationHistory as any)) {
+      console.warn('[Agent] Tool pairing invalid — auto-repairing history');
+      this.conversationHistory = stripOrphanedTools(this.conversationHistory as any);
+    }
+
     // === TOKEN BUDGET: build system prompt with priority trimming ===
     const systemPrompt = this.buildBudgetedSystemPrompt();
+
+    // === DEBUG LOGGING: track request shape ===
+    const sysTokenEst = estimateTokens(systemPrompt);
+    const histTokenEst = this.conversationHistory.reduce((sum, m) => {
+      const t = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+      return sum + estimateTokens(t);
+    }, 0);
+    console.log(`[Agent] → ${model} | system=${sysTokenEst}tok | history=${this.conversationHistory.length}msgs/${histTokenEst}tok | tools=${useTools ? 'yes' : 'no'}`);
+    const requestStartMs = Date.now();
 
     let finalText = '';
     let continueLoop = true;
@@ -252,11 +275,29 @@ export class ClaudeAgent {
             await new Promise(r => setTimeout(r, waitMs));
           }
 
+          // === PROMPT CACHING: cache system prompt + tools (5min TTL by default) ===
+          // The system prompt and 81 tool definitions are mostly static — caching them
+          // gives ~90% discount on input tokens and ~2x faster response on cache hits.
+          const systemBlocks: Anthropic.TextBlockParam[] = [
+            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+          ];
+
+          let toolsForRequest: Anthropic.Tool[] | undefined;
+          if (useTools) {
+            const tools = getToolDefinitions() as Anthropic.Tool[];
+            // Mark the LAST tool with cache_control — caches everything before it
+            toolsForRequest = tools.map((t, i) =>
+              i === tools.length - 1
+                ? ({ ...t, cache_control: { type: 'ephemeral' } } as Anthropic.Tool)
+                : t,
+            );
+          }
+
           const stream = this.client.messages.stream({
             model,
             max_tokens: maxTokens,
-            system: systemPrompt,
-            ...(useTools ? { tools: getToolDefinitions() as Anthropic.Tool[] } : {}),
+            system: systemBlocks as any,
+            ...(toolsForRequest ? { tools: toolsForRequest } : {}),
             messages: this.conversationHistory as Anthropic.MessageParam[],
           });
 
@@ -266,6 +307,8 @@ export class ClaudeAgent {
           });
 
           response = await stream.finalMessage();
+          const elapsedMs = Date.now() - requestStartMs;
+          console.log(`[Agent] ← ${model} response in ${elapsedMs}ms (stop=${response.stop_reason})`);
           lastError = null;
           break; // success
 
@@ -279,33 +322,56 @@ export class ClaudeAgent {
               if (model !== HAIKU_MODEL) {
                 console.log('[Agent] All retries failed — falling back to Haiku');
                 this.onEvent({ type: 'text_delta', payload: { text: '\n🔄 מעבר למודל מהיר...\n' } });
-                this.conversationHistory.pop(); // remove the user message we added
+                // Roll back history fully — including any tool_use/tool_result blocks
+                // added during this run — so Haiku gets a clean slate.
+                this.conversationHistory = this.conversationHistory.slice(0, historySnapshotLength);
                 return this._processWithClaude(userMessage, images, HAIKU_MODEL, false);
               }
             }
             continue; // retry
           }
-          // Non-rate-limit error — don't retry
+          // Non-rate-limit error — log details and roll back history before throwing
+          const apiErrDetails = (err as any)?.error?.error?.message || (err as any)?.message || String(err);
+          const apiErrStatus = (err as any)?.status || 'unknown';
+          console.error(`[Agent] API error (status ${apiErrStatus}): ${apiErrDetails}`);
+          // Roll back so retry-from-user works without orphaned tool blocks
+          this.conversationHistory = this.conversationHistory.slice(0, historySnapshotLength);
           throw err;
         }
       }
 
       if (lastError) throw lastError;
 
-      // Track usage
-      const inTok = response!.usage?.input_tokens || 0;
-      const outTok = response!.usage?.output_tokens || 0;
-      this.usage.inputTokens += inTok;
+      // Track usage — account for prompt caching (cached read = 10% of input price)
+      const usage = response!.usage as any;
+      const inTok = usage?.input_tokens || 0;
+      const outTok = usage?.output_tokens || 0;
+      const cacheReadTok = usage?.cache_read_input_tokens || 0;
+      const cacheWriteTok = usage?.cache_creation_input_tokens || 0;
+
+      this.usage.inputTokens += inTok + cacheReadTok + cacheWriteTok;
       this.usage.outputTokens += outTok;
       const pricing = ClaudeAgent.PRICING[model] || { input: 3, output: 15 };
-      const msgCost = (inTok * pricing.input + outTok * pricing.output) / 1_000_000;
+      // cache writes cost 1.25x input, cache reads cost 0.1x input
+      const msgCost = (
+        inTok * pricing.input +
+        cacheWriteTok * pricing.input * 1.25 +
+        cacheReadTok * pricing.input * 0.1 +
+        outTok * pricing.output
+      ) / 1_000_000;
       this.usage.totalCost += msgCost;
+
+      if (cacheReadTok > 0 || cacheWriteTok > 0) {
+        console.log(`[Agent] Cache: ${cacheReadTok} read, ${cacheWriteTok} write, ${inTok} fresh input, ${outTok} output`);
+      }
 
       this.onEvent({
         type: 'usage_update' as any,
         payload: {
           inputTokens: inTok,
           outputTokens: outTok,
+          cacheReadTokens: cacheReadTok,
+          cacheWriteTokens: cacheWriteTok,
           messageCost: Math.round(msgCost * 100000) / 100000,
           totalInputTokens: this.usage.inputTokens,
           totalOutputTokens: this.usage.outputTokens,
@@ -503,6 +569,15 @@ export class ClaudeAgent {
     if (resolver) {
       this.pendingApprovals.delete(toolId);
       resolver(approved);
+    }
+  }
+
+  // Called when client disconnects — auto-reject all pending approvals so the
+  // agent loop unblocks and frees resources.
+  cleanup(): void {
+    for (const [toolId, resolver] of this.pendingApprovals.entries()) {
+      try { resolver(false); } catch {}
+      this.pendingApprovals.delete(toolId);
     }
   }
 

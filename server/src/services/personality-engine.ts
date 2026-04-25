@@ -396,8 +396,19 @@ export class PersonalityEngine {
 
   // ===== DEEP ANALYSIS (uses Claude to extract insights) =====
 
+  // Minimum gap between analysis runs to avoid spamming Haiku
+  private static MIN_ANALYSIS_INTERVAL_MS = 5 * 60 * 1000;
+  private lastAnalysisStart = 0;
+
   async analyzeConversation(messages: { role: string; content: string }[]): Promise<void> {
     if (!this.apiKey || messages.length < 4) return;
+
+    // Throttle — analyze at most once per 5 min, regardless of how many chat
+    // turns have happened in between. The Haiku call costs tokens and adds rate-
+    // limit pressure that affected the main chat path.
+    const now = Date.now();
+    if (now - this.lastAnalysisStart < PersonalityEngine.MIN_ANALYSIS_INTERVAL_MS) return;
+    this.lastAnalysisStart = now;
 
     // Queue for analysis (non-blocking)
     this.analysisQueue.push({ messages });
@@ -438,7 +449,7 @@ export class PersonalityEngine {
 
     try {
       const response = await client.messages.create({
-        model: 'claude-3-5-haiku-20241022', // Use Haiku for analysis (cheap)
+        model: 'claude-haiku-4-5-20251001', // Use Haiku for analysis (cheap)
         max_tokens: 1024,
         system: ANALYSIS_PROMPT,
         messages: [{ role: 'user', content: input }],

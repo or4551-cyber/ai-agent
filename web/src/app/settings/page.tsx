@@ -5,9 +5,9 @@ import { Save, Key, Server, Shield, Brain, Trash2, Wifi, WifiOff, Loader2, Info 
 import { useToast } from '@/components/common/Toast';
 
 const MODELS = [
-  { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', desc: 'חכם ומהיר ($3/$15 למיליון טוקנים)', tier: 'recommended' },
-  { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', desc: 'דור קודם ($3/$15 למיליון טוקנים)', tier: 'good' },
-  { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', desc: 'הכי חסכוני ($0.80/$4 למיליון טוקנים)', tier: 'budget' },
+  { id: 'claude-opus-4-7', name: 'Claude Opus 4.7', desc: 'הכי חזק — למשימות מורכבות ($15/$75 למיליון)', tier: 'power' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', desc: 'חכם ומהיר ($3/$15 למיליון טוקנים)', tier: 'recommended' },
+  { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', desc: 'הכי חסכוני ומהיר ($1/$5 למיליון טוקנים)', tier: 'budget' },
 ];
 
 export default function SettingsPage() {
@@ -20,7 +20,7 @@ export default function SettingsPage() {
   useEffect(() => {
     setWsUrl(localStorage.getItem('ws_url') || '');
     setToken(localStorage.getItem('auth_token') || 'dev-token');
-    setModel(localStorage.getItem('ai_model') || 'claude-sonnet-4-20250514');
+    setModel(localStorage.getItem('ai_model') || 'claude-sonnet-4-6');
   }, []);
 
   const handleSave = () => {
@@ -92,6 +92,9 @@ export default function SettingsPage() {
                   )}
                   {m.tier === 'budget' && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-600 text-white">חסכוני</span>
+                  )}
+                  {m.tier === 'power' && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-600 text-white">חזק</span>
                   )}
                 </div>
                 <p className="text-[11px] text-[var(--muted-foreground)] mt-0.5 pr-5">{m.desc}</p>

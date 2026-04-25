@@ -10,22 +10,24 @@ import { ClaudeAgent } from './agent/claude-agent';
 import { WSResponse } from './types';
 import { v4 as uuidv4 } from 'uuid';
 import { ObserverService } from './observer/service';
-import { ReminderService } from './services/reminders';
-import { RoutineService } from './services/routines';
 import { generateBriefing } from './services/briefing';
-import { UserProfileService } from './services/user-profile';
 import { tryOfflineCommand } from './agent/offline-commands';
 import { LocalLLM } from './agent/local-llm';
-import { StorageScanner } from './services/storage-scanner';
-import { SmartAlertsService } from './services/smart-alerts';
-import { ConversationHistoryService } from './services/conversation-history';
 import { getAuthUrl, handleCallback, getGoogleStatus } from './tools/google-auth';
 import { ProactiveAgentService } from './services/proactive-agent';
-import { BackupService } from './services/backup';
 import { VoiceDaemon } from './services/voice-daemon';
-import { FavoritesService } from './services/favorites';
 import { PersonalityEngine } from './services/personality-engine';
 import { RemoteBackend } from './services/remote-backend';
+import {
+  reminderService,
+  routineService,
+  storageScanner,
+  backupService,
+  favoritesService,
+  userProfileService,
+  conversationHistoryService as conversationHistory,
+  smartAlertsService as smartAlerts,
+} from './services/registry';
 
 dotenv.config();
 
@@ -40,19 +42,11 @@ process.on('unhandledRejection', (reason) => {
   console.error('[FATAL] Unhandled rejection (server kept alive):', reason);
 });
 
-// Start background services
+// Start background services (singletons live in services/registry.ts)
 let observer: ObserverService | null = null;
-const reminderService = new ReminderService();
 reminderService.start();
-
-const routineService = new RoutineService();
 routineService.start();
-
-const userProfileService = new UserProfileService();
-const storageScanner = new StorageScanner();
-const smartAlerts = new SmartAlertsService();
 smartAlerts.start();
-const conversationHistory = new ConversationHistoryService();
 
 if (process.env.ANTHROPIC_API_KEY) {
   observer = new ObserverService(process.env.ANTHROPIC_API_KEY);
@@ -61,9 +55,7 @@ if (process.env.ANTHROPIC_API_KEY) {
 
 const proactiveAgent = new ProactiveAgentService();
 proactiveAgent.start();
-const backupService = new BackupService();
 const voiceDaemon = new VoiceDaemon();
-const favoritesService = new FavoritesService();
 const personalityEngine = new PersonalityEngine(process.env.ANTHROPIC_API_KEY);
 const remoteBackend = new RemoteBackend();
 
@@ -73,6 +65,67 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3002;
 const AUTH_TOKEN = process.env.AUTH_TOKEN || 'dev-token';
 const FRONTEND_DIR = path.join(__dirname, '..', '..', 'web', 'out');
+
+// Path-traversal protection: only allow file ops inside these roots
+const ALLOWED_FILE_ROOTS = [
+  '/storage/emulated/0',
+  '/sdcard',
+  process.env.HOME || '/data/data/com.termux/files/home',
+  '/data/data/com.termux/files/home',
+];
+const FILE_BLACKLIST_PATTERNS = [
+  /\/\.ssh(\/|$)/,
+  /\/\.gnupg(\/|$)/,
+  /\/\.env$/,
+  /\/\.env\./,
+  /\/private\.key/i,
+  /\/credentials\.json$/i,
+];
+
+function isPathAllowed(targetPath: string): { ok: boolean; reason?: string } {
+  if (!targetPath || typeof targetPath !== 'string') {
+    return { ok: false, reason: 'Invalid path' };
+  }
+  let resolved: string;
+  try {
+    resolved = path.resolve(targetPath);
+  } catch {
+    return { ok: false, reason: 'Path resolution failed' };
+  }
+  // Block blacklisted paths
+  for (const pattern of FILE_BLACKLIST_PATTERNS) {
+    if (pattern.test(resolved)) {
+      return { ok: false, reason: 'Path blocked by security policy' };
+    }
+  }
+  // Must be under one of the allowed roots
+  const inAllowed = ALLOWED_FILE_ROOTS.some(root => {
+    const r = path.resolve(root);
+    return resolved === r || resolved.startsWith(r + path.sep) || resolved.startsWith(r + '/');
+  });
+  if (!inAllowed) {
+    return { ok: false, reason: `Path outside allowed roots (${ALLOWED_FILE_ROOTS.join(', ')})` };
+  }
+  return { ok: true };
+}
+
+// Security: refuse to start with default token unless explicitly opted in
+if (AUTH_TOKEN === 'dev-token') {
+  if (process.env.ALLOW_DEFAULT_TOKEN !== 'true') {
+    console.error('');
+    console.error('╔═══════════════════════════════════════════════════════════╗');
+    console.error('║  ❌ אבטחה: AUTH_TOKEN לא מוגדר!                            ║');
+    console.error('║                                                            ║');
+    console.error('║  הוסף ל-.env שורה כמו:                                     ║');
+    console.error('║    AUTH_TOKEN=' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2).padEnd(20, '_').slice(0, 20) + '   ║');
+    console.error('║                                                            ║');
+    console.error('║  או הפעל עם ALLOW_DEFAULT_TOKEN=true (לא מומלץ!)          ║');
+    console.error('╚═══════════════════════════════════════════════════════════╝');
+    process.exit(1);
+  } else {
+    console.warn('[SECURITY] ⚠️  Running with default AUTH_TOKEN — NOT for production');
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -86,6 +139,47 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
   }
   next();
 }
+
+// ===== RATE LIMITING (in-memory token bucket) =====
+interface RateBucket { tokens: number; lastRefill: number; }
+const rateBuckets = new Map<string, RateBucket>();
+
+function makeRateLimit(maxPerMinute: number) {
+  const refillRate = maxPerMinute / 60000; // tokens per ms
+  return (req: express.Request, res: express.Response, next: express.NextFunction): void => {
+    const ip = (req.ip || req.socket.remoteAddress || 'unknown').replace(/^::ffff:/, '');
+    const key = `${ip}:${req.path.split('/').slice(0, 4).join('/')}`;
+    const now = Date.now();
+    let bucket = rateBuckets.get(key);
+    if (!bucket) {
+      bucket = { tokens: maxPerMinute, lastRefill: now };
+      rateBuckets.set(key, bucket);
+    }
+    // Refill
+    const elapsed = now - bucket.lastRefill;
+    bucket.tokens = Math.min(maxPerMinute, bucket.tokens + elapsed * refillRate);
+    bucket.lastRefill = now;
+    if (bucket.tokens < 1) {
+      res.status(429).json({ error: 'Rate limit exceeded — try again in a moment' });
+      return;
+    }
+    bucket.tokens -= 1;
+    next();
+  };
+}
+
+// Periodic cleanup so the map doesn't grow indefinitely
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, b] of rateBuckets.entries()) {
+    if (now - b.lastRefill > 5 * 60 * 1000) rateBuckets.delete(k);
+  }
+}, 60 * 1000).unref?.();
+
+const generalLimit = makeRateLimit(120);   // 120/min for normal APIs
+const writeLimit = makeRateLimit(30);      // 30/min for write/delete APIs
+
+app.use('/api', generalLimit);
 
 // ===== REST ENDPOINTS =====
 
@@ -226,9 +320,9 @@ app.get('/api/proactive-alerts', authMiddleware, async (_req, res) => {
 
     // Storage check — using disk free
     try {
-      const { runCommand } = require('./tools/command');
+      const { runCommand } = require('./tools/terminal');
       const dfRaw = await runCommand('df /storage/emulated/0 2>/dev/null | tail -1', undefined, 5000);
-      const parts = dfRaw.trim().split(/\s+/);
+      const parts = (dfRaw || '').trim().split(/\s+/);
       if (parts.length >= 5) {
         const usePct = parseInt(parts[4].replace('%', ''));
         if (usePct >= 90) alerts.push({ id: 'storage', type: 'storage', icon: '💾', text: `אחסון כמעט מלא (${usePct}%)`, priority: 'high' });
@@ -657,21 +751,47 @@ function authQuery(req: express.Request, res: express.Response, next: express.Ne
   next();
 }
 
+// Cache device-stats for 8 seconds to avoid hammering Termux on dashboard refresh
+let deviceStatsCache: { data: Record<string, unknown>; ts: number } | null = null;
+const DEVICE_STATS_TTL_MS = 8000;
+
+function execAsync(cmd: string, timeoutMs: number): Promise<string> {
+  return new Promise((resolve) => {
+    const { exec } = require('child_process');
+    exec(cmd, { timeout: timeoutMs }, (_err: any, stdout: string) => {
+      resolve(stdout || '');
+    });
+  });
+}
+
 app.get('/api/device-stats', authQuery, async (_req, res) => {
-  const { execSync } = require('child_process');
+  // Serve from cache if fresh
+  if (deviceStatsCache && Date.now() - deviceStatsCache.ts < DEVICE_STATS_TTL_MS) {
+    res.json(deviceStatsCache.data);
+    return;
+  }
+
   const os = require('os');
   const stats: Record<string, unknown> = {};
 
+  // Run all reads in parallel — 5 cmds * 5s = 25s sequential, ~5s parallel
+  const [batRaw, volRaw, brightRaw, wifiRaw, btRaw] = await Promise.all([
+    execAsync('termux-battery-status 2>/dev/null', 5000),
+    execAsync('termux-volume 2>/dev/null', 3000),
+    execAsync('settings get system screen_brightness 2>/dev/null', 2000),
+    execAsync('termux-wifi-connectioninfo 2>/dev/null', 3000),
+    execAsync('settings get global bluetooth_on 2>/dev/null', 2000),
+  ]);
+
   // Battery
   try {
-    const raw = execSync('termux-battery-status 2>/dev/null', { timeout: 5000 }).toString();
-    const b = JSON.parse(raw);
+    const b = JSON.parse(batRaw);
     stats.battery = { level: b.percentage ?? -1, charging: b.status === 'CHARGING', temperature: b.temperature };
   } catch {
     stats.battery = { level: -1, charging: false };
   }
 
-  // Storage
+  // Storage (sync but very fast — just stat)
   try {
     const homeDir = process.env.HOME || os.homedir();
     const stat = fs.statfsSync ? fs.statfsSync(homeDir) : null;
@@ -688,42 +808,31 @@ app.get('/api/device-stats', authQuery, async (_req, res) => {
 
   // Volume
   try {
-    const raw = execSync('termux-volume 2>/dev/null', { timeout: 3000 }).toString();
-    const volumes = JSON.parse(raw);
+    const volumes = JSON.parse(volRaw);
     const music = volumes.find((v: any) => v.stream === 'music');
     stats.volume = music?.volume ?? 7;
   } catch {
     stats.volume = 7;
   }
 
-  // Brightness (read from Android settings)
-  try {
-    const raw = execSync('settings get system screen_brightness 2>/dev/null', { timeout: 2000 }).toString();
-    const val = parseInt(raw.trim());
-    stats.brightness = isNaN(val) ? 50 : Math.round(val / 255 * 100);
-  } catch {
-    stats.brightness = 50;
-  }
+  // Brightness
+  const val = parseInt((brightRaw || '').trim());
+  stats.brightness = isNaN(val) ? 50 : Math.round(val / 255 * 100);
 
   // WiFi
   try {
-    const raw = execSync('termux-wifi-connectioninfo 2>/dev/null', { timeout: 3000 }).toString();
-    const wifi = JSON.parse(raw);
+    const wifi = JSON.parse(wifiRaw);
     stats.wifi = wifi.supplicant_state === 'COMPLETED' || (wifi.ip && wifi.ip !== '' && wifi.ip !== '<unknown ssid>');
   } catch {
     stats.wifi = false;
   }
 
-  // Bluetooth (check via settings)
-  try {
-    const raw = execSync('settings get global bluetooth_on 2>/dev/null', { timeout: 2000 }).toString();
-    stats.bluetooth = raw.trim() === '1';
-  } catch {
-    stats.bluetooth = false;
-  }
+  // Bluetooth
+  stats.bluetooth = (btRaw || '').trim() === '1';
 
   stats.flashlight = flashlightOn ?? false;
 
+  deviceStatsCache = { data: stats, ts: Date.now() };
   res.json(stats);
 });
 
@@ -963,6 +1072,8 @@ app.get('/api/dashboard', authMiddleware, async (_req, res) => {
 app.get('/api/files', authMiddleware, async (req, res) => {
   try {
     const dirPath = (req.query.path as string) || '/storage/emulated/0';
+    const check = isPathAllowed(dirPath);
+    if (!check.ok) { res.status(403).json({ error: check.reason }); return; }
     const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
     const items = await Promise.all(
       entries
@@ -1003,6 +1114,8 @@ app.get('/api/files/read', authMiddleware, async (req, res) => {
   try {
     const filePath = req.query.path as string;
     if (!filePath) { res.status(400).json({ error: 'path required' }); return; }
+    const check = isPathAllowed(filePath);
+    if (!check.ok) { res.status(403).json({ error: check.reason }); return; }
     const stat = await fs.promises.stat(filePath);
     if (stat.size > 10 * 1024 * 1024) {
       res.status(400).json({ error: 'File too large (>10MB)' });
@@ -1015,10 +1128,12 @@ app.get('/api/files/read', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/files/write', authMiddleware, async (req, res) => {
+app.post('/api/files/write', writeLimit, authMiddleware, async (req, res) => {
   try {
     const { path: filePath, content } = req.body;
     if (!filePath) { res.status(400).json({ error: 'path required' }); return; }
+    const check = isPathAllowed(filePath);
+    if (!check.ok) { res.status(403).json({ error: check.reason }); return; }
     await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
     await fs.promises.writeFile(filePath, content, 'utf-8');
     res.json({ success: true, path: filePath });
@@ -1027,10 +1142,12 @@ app.post('/api/files/write', authMiddleware, async (req, res) => {
   }
 });
 
-app.delete('/api/files', authMiddleware, async (req, res) => {
+app.delete('/api/files', writeLimit, authMiddleware, async (req, res) => {
   try {
     const filePath = req.query.path as string;
     if (!filePath) { res.status(400).json({ error: 'path required' }); return; }
+    const check = isPathAllowed(filePath);
+    if (!check.ok) { res.status(403).json({ error: check.reason }); return; }
     const stat = await fs.promises.stat(filePath);
     if (stat.isDirectory()) {
       await fs.promises.rm(filePath, { recursive: true });
@@ -1111,10 +1228,12 @@ app.get('/api/gallery/image', (req, res, next) => {
   try {
     const filePath = req.query.path as string;
     if (!filePath) { res.status(400).json({ error: 'path required' }); return; }
-    
+    const check = isPathAllowed(filePath);
+    if (!check.ok) { res.status(403).json({ error: check.reason }); return; }
+
     // Check file exists and get size
     const stat = await fs.promises.stat(filePath);
-    
+
     const ext = path.extname(filePath).toLowerCase();
     const mimeTypes: Record<string, string> = {
       '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
@@ -1201,7 +1320,7 @@ wss.on('connection', (ws: WebSocket, req) => {
   }
 
   // Read model from query params
-  const selectedModel = url.searchParams.get('model') || 'claude-sonnet-4-20250514';
+  const selectedModel = url.searchParams.get('model') || 'claude-sonnet-4-6';
   console.log(`[WS] Model: ${selectedModel}`);
 
   // Create agent for this connection — use safeSend to prevent crashes
@@ -1315,6 +1434,10 @@ wss.on('connection', (ws: WebSocket, req) => {
 
   ws.on('close', () => {
     console.log(`[WS] Client disconnected: ${connectionId}`);
+    const agentToCleanup = agents.get(connectionId);
+    if (agentToCleanup) {
+      try { agentToCleanup.cleanup(); } catch {}
+    }
     agents.delete(connectionId);
   });
 
@@ -1376,7 +1499,7 @@ function getDaemonAgent(): ClaudeAgent | null {
           if (client.readyState === WebSocket.OPEN) client.send(msg);
         } catch {}
       });
-    }, 'claude-sonnet-4-20250514');
+    }, 'claude-sonnet-4-6');
   }
   return daemonAgent;
 }

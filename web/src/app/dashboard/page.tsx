@@ -264,7 +264,7 @@ export default function DashboardPage() {
               <span className="text-[10px] text-[var(--muted-foreground)] flex items-center gap-1" title={`חלון: ${observerStatus.snapshotCount}/${observerStatus.bufferMax || 576} | סה"כ: ${observerStatus.totalCollected || 0} | ${observerStatus.lastSnapshotAge || 'לא זמין'}`}>
                 <Eye size={10} className={observerStatus.running ? 'text-green-400' : 'text-red-400'} />
                 {(observerStatus.totalCollected as number) || (observerStatus.snapshotCount as number) || 0}
-                {observerStatus.lastSnapshotAge && <span className="text-zinc-600">({observerStatus.lastSnapshotAge})</span>}
+                {observerStatus.lastSnapshotAge ? <span className="text-zinc-600">({String(observerStatus.lastSnapshotAge)})</span> : null}
               </span>
             )}
             <button
