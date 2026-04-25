@@ -18,6 +18,7 @@ import { VoiceModeService } from '../services/voice-mode';
 import { BackupService } from '../services/backup';
 import { getPluginManager } from '../tools/definitions';
 import { searchCatalog, getCatalogEntry, catalogToString } from '../services/plugin-catalog';
+import * as uiAuto from '../tools/ui-automator';
 
 const memory = new AgentMemory();
 const reminderService = new ReminderService();
@@ -513,6 +514,37 @@ async function executeToolInternal(
     // Contacts
     case 'google_contacts':
       return googleServices.contactsList(input.query as string | undefined, (input.max_results as number) || 20);
+
+    // ===== UI AUTOMATOR =====
+    case 'ui_read_screen':
+      return uiAuto.uiReadScreen();
+    case 'ui_current_app':
+      return uiAuto.uiGetCurrentApp();
+    case 'ui_tap':
+      if (input.text) return uiAuto.uiTapByText(input.text as string);
+      if (input.x != null && input.y != null) return uiAuto.uiTap(input.x as number, input.y as number);
+      return 'Error: provide text or x,y coordinates';
+    case 'ui_type':
+      return uiAuto.uiType(input.text as string);
+    case 'ui_swipe':
+      return uiAuto.uiSwipe(input.direction as 'up' | 'down' | 'left' | 'right');
+    case 'ui_open_app': {
+      const app = input.app as string;
+      if (app.includes('.')) return uiAuto.uiOpenApp(app);
+      return uiAuto.uiOpenNamedApp(app);
+    }
+    case 'ui_list_apps':
+      return uiAuto.uiListApps();
+    case 'ui_back':
+      return uiAuto.uiBack();
+    case 'ui_home':
+      return uiAuto.uiHome();
+    case 'ui_screenshot':
+      return uiAuto.uiScreenshot();
+    case 'ui_wait_for_text':
+      return uiAuto.uiWaitForText(input.text as string, (input.timeout_ms as number) || 10000).then(found =>
+        found ? `"${input.text}" appeared on screen` : `"${input.text}" did not appear within timeout`
+      );
 
     default: {
       // Try executing as a plugin

@@ -1214,6 +1214,128 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+
+  // ===== UI AUTOMATOR — SCREEN CONTROL =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'ui_read_screen',
+      description: 'Read all visible elements on the phone screen. Returns a list of buttons, text fields, labels with their coordinates. Use this to understand what is currently displayed before interacting.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'ui_current_app',
+      description: 'Get the name/package of the currently active app on screen.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'ui_tap',
+      description: 'Tap on a screen element. Can tap by coordinates (x,y) or by visible text. Always use ui_read_screen first to know what is on screen.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          x: { type: 'number', description: 'X coordinate to tap (optional if text provided)' },
+          y: { type: 'number', description: 'Y coordinate to tap (optional if text provided)' },
+          text: { type: 'string', description: 'Tap on element containing this text (optional if x,y provided)' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'ui_type',
+      description: 'Type text into the currently focused input field on screen. Tap on the field first if needed.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'Text to type' },
+        },
+        required: ['text'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'ui_swipe',
+      description: 'Swipe on the screen in a direction. Useful for scrolling through lists, pages, or dismissing elements.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          direction: { type: 'string', enum: ['up', 'down', 'left', 'right'], description: 'Swipe direction' },
+        },
+        required: ['direction'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'ui_open_app',
+      description: 'Open an app by name. Supported names: whatsapp, telegram, waze, maps, chrome, gmail, phone, camera, settings, youtube, spotify, wolt, gett, instagram, facebook, calendar, gallery. Or provide a full package name.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          app: { type: 'string', description: 'App name (e.g. "whatsapp") or full package name (e.g. "com.whatsapp")' },
+        },
+        required: ['app'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'ui_list_apps',
+      description: 'List all installed third-party apps on the phone.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'ui_back',
+      description: 'Press the Back button on the phone.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'ui_home',
+      description: 'Press the Home button — go to home screen.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'ui_screenshot',
+      description: 'Take a screenshot of the current screen. Returns base64 image. Use to visually analyze what is on screen with AI.',
+      input_schema: { type: 'object', properties: {} },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'ui_wait_for_text',
+      description: 'Wait until specific text appears on screen (up to 10 seconds). Useful after opening an app or triggering an action.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'Text to wait for on screen' },
+          timeout_ms: { type: 'number', description: 'Max wait time in ms (default 10000)' },
+        },
+        required: ['text'],
+      },
+    },
+  },
 ];
 
 // Singleton plugin manager — lazy loaded to avoid circular deps
