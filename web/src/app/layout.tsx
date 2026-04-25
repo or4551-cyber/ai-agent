@@ -17,8 +17,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Agent",
-  description: "Personal AI agent with full device control",
+  title: "Merlin",
+  description: "Merlin — AI agent that controls your phone",
 };
 
 export default function RootLayout({

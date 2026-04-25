@@ -258,13 +258,21 @@ export default function ChatWindow() {
     };
   }, [scrollToBottom]);
 
-  // Auto-send pending command from capabilities page
+  // Auto-send pending command from capabilities page or ?cmd= URL param
   useEffect(() => {
     if (!connected) return;
     const pending = sessionStorage.getItem('pending_command');
     if (pending) {
       sessionStorage.removeItem('pending_command');
       setTimeout(() => handleSend(pending), 300);
+      return;
+    }
+    // Check URL ?cmd= parameter (from Merlin Home quick apps)
+    const params = new URLSearchParams(window.location.search);
+    const cmd = params.get('cmd');
+    if (cmd) {
+      window.history.replaceState({}, '', window.location.pathname);
+      setTimeout(() => handleSend(decodeURIComponent(cmd)), 300);
     }
   }, [connected]);
 

@@ -317,3 +317,34 @@ export function getImageUrl(imagePath: string): string {
   const base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3002';
   return `${base}/api/gallery/image?path=${encodeURIComponent(imagePath)}&token=${token}`;
 }
+
+// ===== HEALTH MONITOR =====
+
+export interface HealthStatus {
+  currentHeartRate: number | null;
+  avgHeartRate: number | null;
+  isHeartRateAbnormal: boolean;
+  todaySteps: number | null;
+  isMoving: boolean;
+  sedentaryMinutes: number;
+  stressLevel: 'low' | 'medium' | 'high' | 'unknown';
+  lastReading: string | null;
+}
+
+export async function getHealthStatus(): Promise<HealthStatus> {
+  return apiFetch('/api/health');
+}
+
+// ===== PROXIMITY / DEVICE SCANNER =====
+
+export interface ProximityStatus {
+  isAlone: boolean;
+  nearbyDeviceCount: number;
+  aloneMinutes: number;
+  lastSeen: string | null;
+  trend: 'alone_longer' | 'company_arrived' | 'stable';
+}
+
+export async function getProximityStatus(): Promise<ProximityStatus> {
+  return apiFetch('/api/proximity');
+}
