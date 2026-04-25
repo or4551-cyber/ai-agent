@@ -20,7 +20,8 @@ export class AgentWebSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private _connected = false;
   private _reconnectAttempts = 0;
-  private _maxReconnectAttempts = 20;
+  private _maxReconnectAttempts = 999;
+  private pingInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(url: string, token: string) {
     this.url = url;
@@ -45,6 +46,14 @@ export class AgentWebSocket {
       this._connected = true;
       this._reconnectAttempts = 0;
       this.emit('connection', { type: 'connection', payload: { status: 'connected' } });
+
+      // Keepalive: send lightweight ping every 20s to prevent idle disconnect
+      if (this.pingInterval) clearInterval(this.pingInterval);
+      this.pingInterval = setInterval(() => {
+        if (this.ws?.readyState === WebSocket.OPEN) {
+          try { this.ws.send(JSON.stringify({ type: 'ping', payload: {} })); } catch {}
+        }
+      }, 20000);
     };
 
     this.ws.onmessage = (event) => {
@@ -59,6 +68,7 @@ export class AgentWebSocket {
 
     this.ws.onclose = () => {
       this._connected = false;
+      if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
       this.emit('connection', { type: 'connection', payload: { status: 'disconnected' } } as unknown as WSEvent);
       this.scheduleReconnect();
     };
@@ -70,6 +80,7 @@ export class AgentWebSocket {
 
   disconnect(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
     this.ws?.close();
     this.ws = null;
     this._connected = false;
@@ -117,10 +128,10 @@ export class AgentWebSocket {
   private scheduleReconnect(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this._reconnectAttempts >= this._maxReconnectAttempts) {
-      this.emit('connection', { type: 'connection', payload: { status: 'failed' } } as unknown as WSEvent);
-      return;
+      // Never truly give up — reset and keep trying
+      this._reconnectAttempts = 0;
     }
-    const delay = Math.min(1000 * Math.pow(1.5, this._reconnectAttempts), 30000);
+    const delay = Math.min(1000 * Math.pow(1.3, this._reconnectAttempts), 15000);
     this._reconnectAttempts++;
     this.emit('connection', { type: 'connection', payload: { status: 'reconnecting', attempt: this._reconnectAttempts } } as unknown as WSEvent);
     this.reconnectTimer = setTimeout(() => {

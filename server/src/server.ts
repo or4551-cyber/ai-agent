@@ -1409,6 +1409,10 @@ wss.on('connection', (ws: WebSocket, req) => {
       } else if (msg.type === 'approval_response') {
         const { id, approved } = msg.payload;
         agent.resolveApproval(id as string, approved as boolean);
+      } else if (msg.type === 'ping') {
+        // Client keepalive — respond with pong and mark alive
+        (ws as any).__isAlive = true;
+        safeSend(ws, JSON.stringify({ type: 'pong', payload: {} }));
       } else if (msg.type === 'abort') {
         // For future: abort running operation
         console.log(`[${connectionId}] Abort requested`);
