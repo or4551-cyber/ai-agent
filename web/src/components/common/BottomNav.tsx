@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageCircle, FolderOpen, Image, LayoutDashboard, Smartphone, Home, Menu, X } from 'lucide-react';
+import { MessageCircle, FolderOpen, Image, LayoutDashboard, Smartphone, Home, Menu, X, Mic } from 'lucide-react';
 import { getProactiveAlerts } from '@/lib/api';
 
 const NAV_ITEMS = [
   { href: '/', icon: Home, label: 'בית' },
   { href: '/chat', icon: MessageCircle, label: 'צ\'אט' },
+  { href: '/live', icon: Mic, label: 'Live' },
   { href: '/dashboard', icon: LayoutDashboard, label: 'דשבורד' },
   { href: '/device', icon: Smartphone, label: 'שלט' },
   { href: '/files', icon: FolderOpen, label: 'קבצים' },

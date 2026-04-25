@@ -55,6 +55,9 @@ function HealthCard({ health, proximity }: { health: HealthStatus | null; proxim
       <div className="flex items-center gap-2 mb-3">
         <Activity size={16} className="text-[var(--primary)]" />
         <span className="text-xs font-medium text-zinc-400">סטטוס בריאות</span>
+        {!health?.lastReading && (
+          <span className="text-[9px] text-zinc-600 mr-auto">חיישנים לא זמינים</span>
+        )}
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">
         {/* Heart Rate */}
@@ -184,7 +187,7 @@ function SearchBar() {
         dir="auto"
       />
       <button
-        onClick={() => router.push('/chat?voice=1')}
+        onClick={() => router.push('/live')}
         className="w-8 h-8 rounded-full bg-[var(--primary)]/20 flex items-center justify-center hover:bg-[var(--primary)]/30 transition-colors"
       >
         <Mic size={16} className="text-[var(--primary)]" />
