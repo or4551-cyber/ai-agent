@@ -29,6 +29,17 @@ import { RemoteBackend } from './services/remote-backend';
 
 dotenv.config();
 
+// ===== CRASH PROTECTION =====
+// Prevent unhandled errors from killing the server
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception (server kept alive):', err.message);
+  console.error(err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection (server kept alive):', reason);
+});
+
 // Start background services
 let observer: ObserverService | null = null;
 const reminderService = new ReminderService();
@@ -1132,13 +1143,42 @@ const agents = new Map<string, ClaudeAgent>();
 proactiveAgent.setNotifyHandler((action) => {
   const msg = JSON.stringify({ type: 'proactive_action', payload: action });
   wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
-    }
+    try {
+      if (client.readyState === WebSocket.OPEN) client.send(msg);
+    } catch {}
   });
 });
 
+// ===== WEBSOCKET KEEPALIVE =====
+// Ping every 25s to detect dead connections before they cause errors
+const WS_PING_INTERVAL = setInterval(() => {
+  wss.clients.forEach((ws: WebSocket) => {
+    if ((ws as any).__isAlive === false) {
+      console.log('[WS] Terminating dead connection');
+      return ws.terminate();
+    }
+    (ws as any).__isAlive = false;
+    try { ws.ping(); } catch {}
+  });
+}, 25000);
+
+wss.on('close', () => clearInterval(WS_PING_INTERVAL));
+
+// Safe send: never crash on dead socket
+function safeSend(ws: WebSocket, data: string): void {
+  try {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  } catch (err) {
+    console.error('[WS] safeSend failed:', (err as Error).message);
+  }
+}
+
 wss.on('connection', (ws: WebSocket, req) => {
+  // Keepalive tracking
+  (ws as any).__isAlive = true;
+  ws.on('pong', () => { (ws as any).__isAlive = true; });
   // Auth check
   const url = new URL(req.url || '', `http://localhost:${PORT}`);
   const token = url.searchParams.get('token');
@@ -1164,11 +1204,9 @@ wss.on('connection', (ws: WebSocket, req) => {
   const selectedModel = url.searchParams.get('model') || 'claude-sonnet-4-20250514';
   console.log(`[WS] Model: ${selectedModel}`);
 
-  // Create agent for this connection
+  // Create agent for this connection — use safeSend to prevent crashes
   const agent = new ClaudeAgent(apiKey, (event: WSResponse) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(event));
-    }
+    safeSend(ws, JSON.stringify(event));
   }, selectedModel);
 
   agents.set(connectionId, agent);
@@ -1193,8 +1231,8 @@ wss.on('connection', (ws: WebSocket, req) => {
             try {
               const result = await offlineResult;
               if (result.handled) {
-                ws.send(JSON.stringify({ type: 'text_delta', payload: { text: result.response } }));
-                ws.send(JSON.stringify({ type: 'message_done', payload: { text: result.response } }));
+                safeSend(ws, JSON.stringify({ type: 'text_delta', payload: { text: result.response } }));
+                safeSend(ws, JSON.stringify({ type: 'message_done', payload: { text: result.response } }));
                 console.log(`[${connectionId}] Offline command handled`);
                 return;
               }
@@ -1205,22 +1243,26 @@ wss.on('connection', (ws: WebSocket, req) => {
         try {
           await agent.processMessage(userMessage, images);
           // Auto-save conversation after each exchange
-          const snap = agent.getConversationSnapshot();
-          if (snap.messages.length >= 2) {
-            conversationHistory.save({
-              id: snap.id,
-              title: '',
-              messages: snap.messages.map((m, i) => ({
-                id: `${snap.id}-${i}`,
-                role: m.role as 'user' | 'assistant',
-                content: m.content,
-                timestamp: Date.now(),
-              })),
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            });
-            // Personality Engine: deep analysis (non-blocking, uses Haiku)
-            personalityEngine.analyzeConversation(snap.messages).catch(() => {});
+          try {
+            const snap = agent.getConversationSnapshot();
+            if (snap.messages.length >= 2) {
+              conversationHistory.save({
+                id: snap.id,
+                title: '',
+                messages: snap.messages.map((m, i) => ({
+                  id: `${snap.id}-${i}`,
+                  role: m.role as 'user' | 'assistant',
+                  content: m.content,
+                  timestamp: Date.now(),
+                })),
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              });
+              // Personality Engine: deep analysis (non-blocking, uses Haiku)
+              personalityEngine.analyzeConversation(snap.messages).catch(() => {});
+            }
+          } catch (saveErr) {
+            console.error(`[${connectionId}] Save error (non-fatal):`, (saveErr as Error).message);
           }
         } catch (err) {
           const errorMsg = (err as Error).message;
@@ -1230,17 +1272,17 @@ wss.on('connection', (ws: WebSocket, req) => {
           if (!images && localLLM.isAvailable()) {
             try {
               console.log(`[${connectionId}] Falling back to local LLM...`);
-              ws.send(JSON.stringify({ type: 'text_delta', payload: { text: '🔄 Claude לא זמין. משתמש במודל מקומי...\n\n' } }));
+              safeSend(ws, JSON.stringify({ type: 'text_delta', payload: { text: '🔄 Claude לא זמין. משתמש במודל מקומי...\n\n' } }));
               const localResponse = localLLM.generate(userMessage);
-              ws.send(JSON.stringify({ type: 'text_delta', payload: { text: localResponse } }));
-              ws.send(JSON.stringify({ type: 'message_done', payload: { text: localResponse } }));
+              safeSend(ws, JSON.stringify({ type: 'text_delta', payload: { text: localResponse } }));
+              safeSend(ws, JSON.stringify({ type: 'message_done', payload: { text: localResponse } }));
               return;
             } catch (llmErr) {
               console.error(`[${connectionId}] Local LLM also failed:`, (llmErr as Error).message);
             }
           }
 
-          ws.send(JSON.stringify({
+          safeSend(ws, JSON.stringify({
             type: 'error',
             payload: { message: '❌ ' + errorMsg + (localLLM.isAvailable() ? '' : '\n\nטיפ: התקן llama.cpp למצב offline') },
           }));
@@ -1257,14 +1299,14 @@ wss.on('connection', (ws: WebSocket, req) => {
         console.log(`[${connectionId}] Live mode: ${live}`);
       } else if (msg.type === 'clear_history') {
         agent.clearHistory();
-        ws.send(JSON.stringify({
+        safeSend(ws, JSON.stringify({
           type: 'message_done',
           payload: { text: 'Conversation history cleared.' },
         }));
       }
     } catch (err) {
       console.error('Failed to parse message:', err);
-      ws.send(JSON.stringify({
+      safeSend(ws, JSON.stringify({
         type: 'error',
         payload: { message: 'Invalid message format' },
       }));
@@ -1310,9 +1352,9 @@ if (fs.existsSync(FRONTEND_DIR)) {
 voiceDaemon.setEventHandler((data) => {
   const msg = JSON.stringify({ type: 'voice_daemon', payload: data });
   wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
-    }
+    try {
+      if (client.readyState === WebSocket.OPEN) client.send(msg);
+    } catch {}
   });
   // Only log important events, skip repetitive 'listening' ticks
   if (data.event !== 'listening') {
@@ -1330,9 +1372,9 @@ function getDaemonAgent(): ClaudeAgent | null {
       // Forward agent events as daemon WS events
       const msg = JSON.stringify({ type: 'voice_daemon_agent', payload: event });
       wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN) {
-          client.send(msg);
-        }
+        try {
+          if (client.readyState === WebSocket.OPEN) client.send(msg);
+        } catch {}
       });
     }, 'claude-sonnet-4-20250514');
   }
