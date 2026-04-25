@@ -109,22 +109,9 @@ function isPathAllowed(targetPath: string): { ok: boolean; reason?: string } {
   return { ok: true };
 }
 
-// Security: refuse to start with default token unless explicitly opted in
+// Security notice: warn if using default token
 if (AUTH_TOKEN === 'dev-token') {
-  if (process.env.ALLOW_DEFAULT_TOKEN !== 'true') {
-    console.error('');
-    console.error('╔═══════════════════════════════════════════════════════════╗');
-    console.error('║  ❌ אבטחה: AUTH_TOKEN לא מוגדר!                            ║');
-    console.error('║                                                            ║');
-    console.error('║  הוסף ל-.env שורה כמו:                                     ║');
-    console.error('║    AUTH_TOKEN=' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2).padEnd(20, '_').slice(0, 20) + '   ║');
-    console.error('║                                                            ║');
-    console.error('║  או הפעל עם ALLOW_DEFAULT_TOKEN=true (לא מומלץ!)          ║');
-    console.error('╚═══════════════════════════════════════════════════════════╝');
-    process.exit(1);
-  } else {
-    console.warn('[SECURITY] ⚠️  Running with default AUTH_TOKEN — NOT for production');
-  }
+  console.warn('[SECURITY] ⚠️  AUTH_TOKEN=dev-token — לשיפור אבטחה, הגדר טוקן ייחודי ב-.env');
 }
 
 app.use(cors());
