@@ -155,7 +155,8 @@ export class ClaudeAgent {
     let continueLoop = true;
 
     while (continueLoop) {
-      const response = await this.client.messages.create({
+      // Use streaming for real-time text delivery
+      const stream = this.client.messages.stream({
         model: this.model,
         max_tokens: this.liveMode ? 1024 : 8192,
         system: buildSystemPrompt({
@@ -167,6 +168,18 @@ export class ClaudeAgent {
         tools: getToolDefinitions() as Anthropic.Tool[],
         messages: this.conversationHistory as Anthropic.MessageParam[],
       });
+
+      // Stream text deltas in real-time
+      stream.on('text', (text) => {
+        finalText += text;
+        this.onEvent({
+          type: 'text_delta',
+          payload: { text },
+        });
+      });
+
+      // Wait for the full response
+      const response = await stream.finalMessage();
 
       // Track usage
       const inTok = response.usage?.input_tokens || 0;
@@ -189,20 +202,15 @@ export class ClaudeAgent {
         },
       });
 
-      // Process content blocks
+      // Process content blocks for tool calls
       const assistantContent: ContentBlock[] = [];
       const toolResults: ContentBlock[] = [];
       continueLoop = false;
 
       for (const block of response.content) {
         if (block.type === 'text') {
-          finalText += block.text;
           assistantContent.push({ type: 'text', text: block.text });
-
-          this.onEvent({
-            type: 'text_delta',
-            payload: { text: block.text },
-          });
+          // text_delta already emitted via stream
         } else if (block.type === 'tool_use') {
           continueLoop = true;
           assistantContent.push({

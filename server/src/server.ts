@@ -73,7 +73,7 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
 
 // ===== REST ENDPOINTS =====
 
-app.get('/api/health', (_req, res) => {
+app.get('/api/status', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0' });
 });
 
