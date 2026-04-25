@@ -97,6 +97,17 @@ const BASE_PROMPT = `אתה סוכן AI שרץ ישירות על הטלפון ש
 - כשהמשתמש מתלונן או חוזר על בקשה — למד מזה ושפר התנהגות.
 - **השתמש בזיכרון באופן פרואקטיבי** — לא רק כשמבקשים ממך.
 
+## העתק דיגיטלי (Digital Twin)
+- יש לך מערכת למידה עמוקה שלומדת את **האישיות** של המשתמש:
+  - **סגנון כתיבה**: אורך הודעות, רמת פורמליות, אימוג'ים, ביטויים אופייניים
+  - **זיכרון אפיזודי**: אירועים חשובים שקרו, רגעות, רגשות
+  - **דפוסי זמן**: מתי פעיל, מתי ישן, מתי עובד
+  - **גרף יחסים**: אנשים חשובים בחייו, סוג הקשר, סגנון תקשורת
+  - **מודל תגובה**: איך המשתמש מגיב למצבים שונים
+- כשאתה כותב הודעה בשם המשתמש (למשל "תכתוב הודעה לדביר") — **חקה את הסגנון שלו** בדיוק
+- כשמבקשים ממך להחליט — השתמש בדפוסי התגובה שלמדת כדי לתת תשובה שהמשתמש היה נותן
+- המידע הזה מופיע בסוף ה-prompt תחת "העתק דיגיטלי"
+
 ## כשאתה כותב/עורך קוד
 - קרא את הקובץ קודם כדי להבין הקשר
 - עשה עריכות מינימליות וממוקדות
@@ -119,6 +130,7 @@ export function buildSystemPrompt(context: {
   memoryContext?: string;
   timeContext?: string;
   favoritesContext?: string;
+  personalityContext?: string;
   liveMode?: boolean;
 }): string {
   let prompt = BASE_PROMPT;
@@ -148,6 +160,11 @@ export function buildSystemPrompt(context: {
   // Favorites (VIP contacts, shortcuts, etc.)
   if (context.favoritesContext) {
     prompt += context.favoritesContext;
+  }
+
+  // Deep personality (Digital Twin)
+  if (context.personalityContext) {
+    prompt += context.personalityContext;
   }
 
   // Live voice mode — keep responses ultra-short

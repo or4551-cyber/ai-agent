@@ -8,6 +8,7 @@ import { UserProfileService } from '../services/user-profile';
 import { ConversationLearner } from '../services/conversation-learner';
 import { LocalLLM } from './local-llm';
 import { FavoritesService } from '../services/favorites';
+import { PersonalityEngine } from '../services/personality-engine';
 
 // Patterns that indicate a simple query answerable by local LLM (no tools needed)
 const LOCAL_LLM_PATTERNS = [
@@ -64,6 +65,7 @@ export class ClaudeAgent {
 
   private localLLM: LocalLLM;
   private favorites: FavoritesService;
+  private personality: PersonalityEngine;
   private liveMode = false;
 
   constructor(
@@ -80,6 +82,7 @@ export class ClaudeAgent {
     this.learner = new ConversationLearner(apiKey, this.userProfile);
     this.localLLM = new LocalLLM();
     this.favorites = new FavoritesService();
+    this.personality = new PersonalityEngine(apiKey);
     
     // Record that user is active
     this.userProfile.recordActivity();
@@ -189,6 +192,7 @@ export class ClaudeAgent {
           userProfileContext: this.userProfile.toContextString(),
           memoryContext: this.memory.toContextString(),
           favoritesContext: this.favorites.toContextString(),
+          personalityContext: this.personality.toContextString(),
           liveMode: this.liveMode,
         }),
         ...(useHaiku ? {} : { tools: getToolDefinitions() as Anthropic.Tool[] }),

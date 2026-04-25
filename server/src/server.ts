@@ -23,6 +23,7 @@ import { ProactiveAgentService } from './services/proactive-agent';
 import { BackupService } from './services/backup';
 import { VoiceDaemon } from './services/voice-daemon';
 import { FavoritesService } from './services/favorites';
+import { PersonalityEngine } from './services/personality-engine';
 
 dotenv.config();
 
@@ -50,6 +51,7 @@ proactiveAgent.start();
 const backupService = new BackupService();
 const voiceDaemon = new VoiceDaemon();
 const favoritesService = new FavoritesService();
+const personalityEngine = new PersonalityEngine(process.env.ANTHROPIC_API_KEY);
 
 const localLLM = new LocalLLM();
 
@@ -526,6 +528,29 @@ app.post('/api/favorites/location', authMiddleware, (req, res) => {
   res.json(favoritesService.addLocation(req.body));
 });
 
+// ===== PERSONALITY ENGINE API =====
+
+app.get('/api/personality', authMiddleware, (_req, res) => {
+  res.json(personalityEngine.getData());
+});
+
+app.get('/api/personality/style', authMiddleware, (_req, res) => {
+  res.json(personalityEngine.getWritingStyle());
+});
+
+app.get('/api/personality/relationships', authMiddleware, (_req, res) => {
+  res.json({ relationships: personalityEngine.getRelationships() });
+});
+
+app.get('/api/personality/episodes', authMiddleware, (req, res) => {
+  const limit = parseInt(req.query.limit as string) || 20;
+  res.json({ episodes: personalityEngine.getRecentEpisodes(limit) });
+});
+
+app.get('/api/personality/time-patterns', authMiddleware, (_req, res) => {
+  res.json(personalityEngine.getTimePatterns());
+});
+
 // ===== CONVERSATION HISTORY API =====
 
 app.get('/api/conversations', authMiddleware, (req, res) => {
@@ -555,7 +580,7 @@ app.delete('/api/conversations', authMiddleware, (_req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/conversations/:id/export', authMiddleware, (req, res) => {
+app.get('/api/conversations/:id/export', authQuery, (req, res) => {
   const conv = conversationHistory.get(req.params.id as string);
   if (!conv) { res.status(404).json({ error: 'Not found' }); return; }
   const format = (req.query.format as string) || 'txt';
@@ -1120,6 +1145,10 @@ wss.on('connection', (ws: WebSocket, req) => {
         const images = msg.payload.images as { base64: string; mediaType: string }[] | undefined;
         console.log(`[${connectionId}] User: ${userMessage.substring(0, 100)}${images ? ` [+${images.length} images]` : ''}`);
 
+        // Personality Engine: record message + time
+        personalityEngine.recordUserMessage(userMessage);
+        personalityEngine.recordActivity();
+
         // Try offline command first (no AI needed)
         if (!images) {
           const offlineResult = tryOfflineCommand(userMessage);
@@ -1153,6 +1182,8 @@ wss.on('connection', (ws: WebSocket, req) => {
               createdAt: Date.now(),
               updatedAt: Date.now(),
             });
+            // Personality Engine: deep analysis (non-blocking, uses Haiku)
+            personalityEngine.analyzeConversation(snap.messages).catch(() => {});
           }
         } catch (err) {
           const errorMsg = (err as Error).message;
