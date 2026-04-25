@@ -247,7 +247,7 @@ export default function MerlinHome() {
 
   return (
     <div className="flex flex-col h-full overflow-y-auto scrollbar-hide">
-      <div className="flex flex-col gap-5 p-4 pb-24 max-w-lg mx-auto w-full">
+      <div className="flex flex-col gap-5 p-4 pb-28 max-w-lg mx-auto w-full">
         {/* Clock + Greeting */}
         <Clock />
 

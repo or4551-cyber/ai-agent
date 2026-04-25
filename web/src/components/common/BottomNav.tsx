@@ -50,11 +50,15 @@ export default function BottomNav() {
   // Close on navigation
   useEffect(() => { setOpen(false); }, [pathname]);
 
+  // Hide on pages with bottom input bars (chat, live) to avoid overlap
+  const hideOnPages = ['/chat', '/live'];
+  const isHidden = hideOnPages.includes(pathname);
+
   return (
-    <div ref={menuRef} className="fixed bottom-4 left-4 z-50 md:hidden" style={{ bottom: 'max(16px, env(safe-area-inset-bottom))' }}>
+    <div ref={menuRef} className={`fixed bottom-4 right-4 z-50 md:hidden transition-all duration-200 ${isHidden ? 'translate-y-20 opacity-0 pointer-events-none' : ''}`} style={{ bottom: 'max(16px, env(safe-area-inset-bottom))' }}>
       {/* Popup menu */}
       {open && (
-        <div className="absolute bottom-14 left-0 glass border border-[var(--border)] rounded-2xl p-2 min-w-[160px] shadow-2xl shadow-black/40 animate-fade-in">
+        <div className="absolute bottom-14 right-0 glass border border-[var(--border)] rounded-2xl p-2 min-w-[160px] shadow-2xl shadow-black/40 animate-fade-in">
           {NAV_ITEMS.map((item) => {
             const isActive = pathname === item.href;
             const Icon = item.icon;
