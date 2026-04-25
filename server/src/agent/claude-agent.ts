@@ -157,7 +157,7 @@ export class ClaudeAgent {
     while (continueLoop) {
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: 8192,
+        max_tokens: this.liveMode ? 1024 : 8192,
         system: buildSystemPrompt({
           userProfileContext: this.userProfile.toContextString(),
           memoryContext: this.memory.toContextString(),

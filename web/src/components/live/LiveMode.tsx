@@ -340,7 +340,7 @@ export default function LiveMode() {
       if (isDoneRef.current && activeRef.current) {
         isDoneRef.current = false;
         setState('listening');
-        setTimeout(() => startListening(), 300);
+        setTimeout(() => startListening(), 150);
       }
       return;
     }
@@ -357,13 +357,19 @@ export default function LiveMode() {
 
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.lang = 'he-IL';
-    utterance.rate = 1.1;
+    utterance.rate = 1.15;
     utterance.pitch = 1;
 
     const voices = speechSynthesis.getVoices();
     const heVoice = voices.find(v => v.lang.startsWith('he'));
     if (heVoice) utterance.voice = heVoice;
 
+    utterance.onstart = () => {
+      // Start STT in parallel for barge-in detection
+      if (activeRef.current && !recognitionRef.current) {
+        setTimeout(() => startListening(), 100);
+      }
+    };
     utterance.onend = () => processNextChunk();
     utterance.onerror = () => processNextChunk();
 
@@ -433,59 +439,54 @@ export default function LiveMode() {
     speechSynthesis.speak(utterance);
   }, [muted]);
 
+  // ===== CANCEL TTS (barge-in) =====
+  const cancelTTS = useCallback(() => {
+    speechSynthesis.cancel();
+    ttsQueueRef.current = [];
+    ttsSpeakingRef.current = false;
+    isDoneRef.current = false;
+    assistantBufferRef.current = '';
+    spokenIndexRef.current = 0;
+    setCurrentText('');
+  }, []);
+
   // ===== STT =====
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const SILENCE_MS = 2000; // 2 seconds of silence = end of speech
+
   const startListening = useCallback(() => {
     if (!hasSpeechAPI || !activeRef.current) return;
-    // Don't start if page is hidden
     if (document.hidden) return;
 
     setState('listening');
 
     // Abort any existing recognition
     try { recognitionRef.current?.abort(); } catch {}
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
 
     const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = 'he-IL';
-    recognition.continuous = false;
+    recognition.continuous = true;      // Keep listening until we decide to stop
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    let finalTranscript = '';
+    let fullTranscript = '';
     let hasResult = false;
+    let userStartedSpeaking = false;
 
-    recognition.onresult = (event: any) => {
-      let interim = '';
-      finalTranscript = '';
-      for (let i = 0; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript;
-        } else {
-          interim += event.results[i][0].transcript;
-        }
+    const submitTranscript = () => {
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+      const text = fullTranscript.trim();
+      if (!text || !activeRef.current) {
+        // No text — just keep listening
+        return;
       }
-      hasResult = true;
-      setCurrentText(finalTranscript || interim);
-    };
 
-    recognition.onend = () => {
-      const text = finalTranscript.trim();
+      // Stop recognition while processing
+      try { recognition.abort(); } catch {}
+
       setCurrentText('');
-
-      if (!activeRef.current) return;
-
-      // If page went to background during recognition
-      if (document.hidden) {
-        setState('background');
-        return;
-      }
-
-      if (!text || !hasResult) {
-        if (activeRef.current) {
-          setTimeout(() => startListening(), 500);
-        }
-        return;
-      }
 
       // Check stop words
       const lower = text.toLowerCase();
@@ -501,20 +502,64 @@ export default function LiveMode() {
       wsRef.current?.sendMessage(text);
     };
 
-    recognition.onerror = (event: any) => {
-      if (!activeRef.current) return;
+    recognition.onresult = (event: any) => {
+      // BARGE-IN: user started speaking — stop TTS immediately
+      if (!userStartedSpeaking) {
+        userStartedSpeaking = true;
+        if (ttsSpeakingRef.current || ttsQueueRef.current.length > 0) {
+          cancelTTS();
+        }
+        setState('listening');
+      }
 
-      if (document.hidden) {
-        setState('background');
+      let interim = '';
+      fullTranscript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          fullTranscript += event.results[i][0].transcript;
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      hasResult = true;
+      setCurrentText(fullTranscript || interim);
+
+      // Reset silence timer on every result
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        submitTranscript();
+      }, SILENCE_MS);
+    };
+
+    recognition.onend = () => {
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+
+      if (!activeRef.current) return;
+      if (document.hidden) { setState('background'); return; }
+
+      // If we had speech, submit it
+      if (hasResult && fullTranscript.trim()) {
+        submitTranscript();
         return;
       }
 
+      // No speech detected — restart listening
+      if (activeRef.current) {
+        setTimeout(() => startListening(), 200);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+      if (!activeRef.current) return;
+      if (document.hidden) { setState('background'); return; }
+
       if (event.error === 'no-speech') {
-        setTimeout(() => startListening(), 500);
+        setTimeout(() => startListening(), 300);
       } else if (event.error === 'aborted' || event.error === 'not-allowed') {
-        // Page went to background or permission issue — will resume on visibility change
+        // Will resume on visibility change
       } else {
-        setTimeout(() => startListening(), 1000);
+        setTimeout(() => startListening(), 500);
       }
     };
 
@@ -522,10 +567,9 @@ export default function LiveMode() {
     try {
       recognition.start();
     } catch {
-      // Already started or other error — retry
-      setTimeout(() => startListening(), 500);
+      setTimeout(() => startListening(), 300);
     }
-  }, [hasSpeechAPI]);
+  }, [hasSpeechAPI, cancelTTS]);
 
   // ===== SESSION CONTROL =====
   const startSession = useCallback(() => {
@@ -590,12 +634,10 @@ export default function LiveMode() {
   };
 
   const interrupt = () => {
-    speechSynthesis.cancel();
-    assistantBufferRef.current = '';
-    setCurrentText('');
+    cancelTTS();
     if (active) {
       setState('listening');
-      setTimeout(() => startListening(), 200);
+      setTimeout(() => startListening(), 100);
     }
   };
 

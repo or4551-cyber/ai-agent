@@ -56,7 +56,10 @@ function HealthCard({ health, proximity }: { health: HealthStatus | null; proxim
         <Activity size={16} className="text-[var(--primary)]" />
         <span className="text-xs font-medium text-zinc-400">סטטוס בריאות</span>
         {!health?.lastReading && (
-          <span className="text-[9px] text-zinc-600 mr-auto">חיישנים לא זמינים</span>
+          <span className="text-[9px] text-zinc-600 mr-auto">מתחבר לשעון...</span>
+        )}
+        {health?.lastReading && !health?.currentHeartRate && !health?.todaySteps && (
+          <span className="text-[9px] text-zinc-600 mr-auto">ממתין לנתונים מהשעון</span>
         )}
       </div>
       <div className="grid grid-cols-4 gap-3 text-center">

@@ -87,6 +87,17 @@ export class HealthMonitor {
       return [];
     }, []);
     console.log(`[HealthMonitor] Sensors found: ${this.availableSensors.length}`);
+    // Log health-relevant sensors
+    const healthSensors = this.availableSensors.filter(s => {
+      const low = s.toLowerCase();
+      return low.includes('heart') || low.includes('step') || low.includes('ppg') ||
+        low.includes('pedometer') || low.includes('walk') || low.includes('hr');
+    });
+    if (healthSensors.length > 0) {
+      console.log(`[HealthMonitor] Health sensors: ${healthSensors.join(', ')}`);
+    } else {
+      console.log('[HealthMonitor] No direct health sensors. Using Samsung Health notifications.');
+    }
   }
 
   // ===== SAMSUNG HEALTH NOTIFICATION SCRAPING =====
@@ -238,10 +249,11 @@ export class HealthMonitor {
     this.readSamsungHealthNotifications();
     if (this.samsungHealthCache.steps) return this.samsungHealthCache.steps;
 
-    // 2. Try step counter sensor (some phones have this)
-    const stepSensor = this.availableSensors.find(s =>
-      s.toLowerCase().includes('step') || s.toLowerCase().includes('pedometer')
-    );
+    // 2. Try step counter sensor (Samsung phones often have this)
+    const stepSensor = this.availableSensors.find(s => {
+      const low = s.toLowerCase();
+      return low.includes('step') || low.includes('pedometer') || low.includes('walk');
+    });
 
     if (stepSensor) {
       const result = safe(() => {
@@ -259,7 +271,19 @@ export class HealthMonitor {
       if (result !== null) return result;
     }
 
-    return null;
+    // 3. Try Samsung Health via dumpsys (requires DUMP permission)
+    return safe(() => {
+      const raw = execSync(
+        'dumpsys activity provider com.sec.android.app.shealth 2>/dev/null | grep -i step | head -5',
+        { timeout: 5000 }
+      ).toString();
+      const match = raw.match(/(\d{2,6})/);
+      if (match) {
+        const n = parseInt(match[1]);
+        if (n > 0 && n < 200000) return n;
+      }
+      return null;
+    }, null);
   }
 
   // ===== ACCELEROMETER (movement detection) =====
