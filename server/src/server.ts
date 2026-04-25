@@ -433,6 +433,11 @@ app.get('/api/health/debug', authMiddleware, (_req, res) => {
   });
 });
 
+app.get('/api/health/notifications', authMiddleware, (_req, res) => {
+  const monitor = proactiveAgent.getHealthMonitor();
+  res.json(monitor.debugNotifications());
+});
+
 app.get('/api/proximity', authMiddleware, (_req, res) => {
   const proximity = proactiveAgent.getDeviceScanner().getProximityStatus();
   res.json(proximity);
@@ -1144,6 +1149,10 @@ wss.on('connection', (ws: WebSocket, req) => {
       } else if (msg.type === 'abort') {
         // For future: abort running operation
         console.log(`[${connectionId}] Abort requested`);
+      } else if (msg.type === 'set_live_mode') {
+        const live = msg.payload.enabled === true;
+        agent.setLiveMode(live);
+        console.log(`[${connectionId}] Live mode: ${live}`);
       } else if (msg.type === 'clear_history') {
         agent.clearHistory();
         ws.send(JSON.stringify({

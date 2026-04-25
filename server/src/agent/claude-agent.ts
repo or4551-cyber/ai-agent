@@ -51,6 +51,7 @@ export class ClaudeAgent {
 
   private localLLM: LocalLLM;
   private favorites: FavoritesService;
+  private liveMode = false;
 
   constructor(
     apiKey: string,
@@ -161,6 +162,7 @@ export class ClaudeAgent {
           userProfileContext: this.userProfile.toContextString(),
           memoryContext: this.memory.toContextString(),
           favoritesContext: this.favorites.toContextString(),
+          liveMode: this.liveMode,
         }),
         tools: getToolDefinitions() as Anthropic.Tool[],
         messages: this.conversationHistory as Anthropic.MessageParam[],
@@ -227,7 +229,7 @@ export class ClaudeAgent {
           const dangerLevel = getDangerLevel(block.name);
           let approved = true;
 
-          if (dangerLevel === 'dangerous') {
+          if (dangerLevel === 'dangerous' && !this.liveMode) {
             approved = await this.requestApproval(block.id, block.name, block.input as Record<string, unknown>);
           }
 
@@ -343,6 +345,10 @@ export class ClaudeAgent {
       this.pendingApprovals.delete(toolId);
       resolver(approved);
     }
+  }
+
+  setLiveMode(live: boolean): void {
+    this.liveMode = live;
   }
 
   clearHistory(): void {

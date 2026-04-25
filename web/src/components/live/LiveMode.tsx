@@ -160,6 +160,7 @@ export default function LiveMode() {
   const synthRef = useRef<SpeechSynthesisUtterance | null>(null);
   const activeRef = useRef(false);
   const assistantBufferRef = useRef('');
+  const spokenIndexRef = useRef(0); // tracks how much text we've already spoken
   const wakeLockRef = useRef<any>(null);
   const keepaliveRef = useRef<HTMLAudioElement | null>(null);
   const stateBeforeBgRef = useRef<LiveState>('listening');
@@ -181,16 +182,50 @@ export default function LiveMode() {
       const text = event.payload.text as string;
       assistantBufferRef.current += text;
       setCurrentText(assistantBufferRef.current);
+
+      // Streaming TTS: speak each sentence as it arrives
+      const buf = assistantBufferRef.current;
+      const spoken = spokenIndexRef.current;
+      const unspoken = buf.substring(spoken);
+      // Look for sentence boundaries
+      const sentenceEnd = unspoken.search(/[.!?\n]\s|[.!?\n]$/);
+      if (sentenceEnd >= 0) {
+        const sentence = unspoken.substring(0, sentenceEnd + 1).trim();
+        if (sentence.length > 2) {
+          spokenIndexRef.current = spoken + sentenceEnd + 1;
+          speakChunk(sentence);
+        }
+      }
     });
 
     ws.on('message_done', () => {
       const fullResponse = assistantBufferRef.current;
+      // Speak any remaining unspoken text
+      const remaining = fullResponse.substring(spokenIndexRef.current).trim();
+      if (remaining.length > 2) {
+        speakChunk(remaining);
+      }
       if (fullResponse.trim()) {
         setTranscript(prev => [...prev, { role: 'assistant', text: fullResponse.trim() }]);
-        speakText(fullResponse.trim());
       }
       assistantBufferRef.current = '';
+      spokenIndexRef.current = 0;
       setCurrentText('');
+      // Signal TTS queue that response is complete — resume listening after last chunk
+      isDoneRef.current = true;
+      // If nothing queued to speak, resume listening now
+      if (!ttsSpeakingRef.current && ttsQueueRef.current.length === 0) {
+        if (activeRef.current) {
+          setState('listening');
+          setTimeout(() => startListening(), 300);
+        }
+      }
+    });
+
+    // Auto-approve dangerous tools in live mode
+    ws.on('approval_request' as any, (event: WSEvent) => {
+      const id = event.payload.id as string;
+      ws.send('approval_response', { id, approved: true });
     });
 
     ws.on('error', () => {
@@ -294,6 +329,59 @@ export default function LiveMode() {
   }, [active]);
 
   // ===== TTS =====
+  const ttsQueueRef = useRef<string[]>([]);
+  const ttsSpeakingRef = useRef(false);
+  const isDoneRef = useRef(false);
+
+  const processNextChunk = useCallback(() => {
+    if (ttsQueueRef.current.length === 0) {
+      ttsSpeakingRef.current = false;
+      // All chunks spoken — resume listening
+      if (isDoneRef.current && activeRef.current) {
+        isDoneRef.current = false;
+        setState('listening');
+        setTimeout(() => startListening(), 300);
+      }
+      return;
+    }
+
+    ttsSpeakingRef.current = true;
+    const chunk = ttsQueueRef.current.shift()!;
+    const clean = chunk
+      .replace(/[#*_`~\[\]()]/g, '')
+      .replace(/\n+/g, '. ')
+      .replace(/https?:\/\/\S+/g, 'קישור')
+      .substring(0, 400);
+
+    if (clean.length < 2) { processNextChunk(); return; }
+
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = 'he-IL';
+    utterance.rate = 1.1;
+    utterance.pitch = 1;
+
+    const voices = speechSynthesis.getVoices();
+    const heVoice = voices.find(v => v.lang.startsWith('he'));
+    if (heVoice) utterance.voice = heVoice;
+
+    utterance.onend = () => processNextChunk();
+    utterance.onerror = () => processNextChunk();
+
+    synthRef.current = utterance;
+    speechSynthesis.speak(utterance);
+  }, []);
+
+  // Streaming TTS: queue a chunk to speak
+  const speakChunk = useCallback((text: string) => {
+    if (muted) return;
+    setState('speaking');
+    ttsQueueRef.current.push(text);
+    if (!ttsSpeakingRef.current) {
+      processNextChunk();
+    }
+  }, [muted, processNextChunk]);
+
+  // Legacy full-text TTS (used for non-streaming cases)
   const speakText = useCallback((text: string) => {
     if (muted) {
       if (activeRef.current) {
@@ -304,6 +392,9 @@ export default function LiveMode() {
     }
 
     setState('speaking');
+    isDoneRef.current = true;
+    ttsQueueRef.current = [];
+    speechSynthesis.cancel();
 
     const clean = text
       .replace(/[#*_`~\[\]()]/g, '')
@@ -313,7 +404,7 @@ export default function LiveMode() {
 
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.lang = 'he-IL';
-    utterance.rate = 1.05;
+    utterance.rate = 1.1;
     utterance.pitch = 1;
 
     const voices = speechSynthesis.getVoices();
@@ -339,7 +430,6 @@ export default function LiveMode() {
     };
 
     synthRef.current = utterance;
-    speechSynthesis.cancel();
     speechSynthesis.speak(utterance);
   }, [muted]);
 
@@ -457,6 +547,9 @@ export default function LiveMode() {
     // DON'T clear WS history — keep full context and memory!
     // wsRef.current?.clearHistory();
 
+    // Tell server we're in live mode (auto-approve dangerous tools)
+    wsRef.current?.send('set_live_mode', { enabled: true });
+
     setTimeout(() => startListening(), 300);
   }, [startListening]);
 
@@ -471,6 +564,9 @@ export default function LiveMode() {
 
     // Stop TTS
     speechSynthesis.cancel();
+
+    // Tell server we're no longer in live mode
+    wsRef.current?.send('set_live_mode', { enabled: false });
 
     // Release Wake Lock
     try { wakeLockRef.current?.release(); } catch {}

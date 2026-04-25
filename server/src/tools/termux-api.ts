@@ -628,10 +628,20 @@ export async function makeCall(number: string): Promise<string> {
   const clean = number.replace(/[^\d+*#]/g, '');
   if (!clean) return '❌ מספר טלפון לא תקין';
   try {
-    await runCommand(`termux-telephony-call "${clean}"`, undefined, 5000);
+    // Try termux-telephony-call first (direct call)
+    await runCommand(`termux-telephony-call "${clean}"`, undefined, 10000);
     return `📞 מחייג ל-${clean}...`;
-  } catch (err) {
-    return `❌ שגיאה בחיוג: ${(err as Error).message}`;
+  } catch {
+    try {
+      // Fallback: open dialer via am start intent
+      await runCommand(
+        `am start -a android.intent.action.CALL -d "tel:${clean}"`,
+        undefined, 10000
+      );
+      return `📞 מחייג ל-${clean}...`;
+    } catch (err2) {
+      return `❌ שגיאה בחיוג: ${(err2 as Error).message}`;
+    }
   }
 }
 

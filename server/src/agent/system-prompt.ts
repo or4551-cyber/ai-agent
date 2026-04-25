@@ -119,6 +119,7 @@ export function buildSystemPrompt(context: {
   memoryContext?: string;
   timeContext?: string;
   favoritesContext?: string;
+  liveMode?: boolean;
 }): string {
   let prompt = BASE_PROMPT;
 
@@ -147,6 +148,11 @@ export function buildSystemPrompt(context: {
   // Favorites (VIP contacts, shortcuts, etc.)
   if (context.favoritesContext) {
     prompt += context.favoritesContext;
+  }
+
+  // Live voice mode — keep responses ultra-short
+  if (context.liveMode) {
+    prompt += `\n## מצב קולי פעיל\n- אתה במצב שיחה קולית — **ענה בקצרה מאוד** (1-2 משפטים מקסימום)\n- אל תכתוב רשימות ארוכות, קוד, או markdown\n- אם צריך לבצע פעולה — תבצע מיד בלי לשאול אישור\n- דבר כמו בשיחת טלפון — טבעי, ישיר, קצר\n`;
   }
 
   return prompt;

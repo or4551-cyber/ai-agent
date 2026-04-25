@@ -107,25 +107,60 @@ export class HealthMonitor {
         const content = (n.content || '') as string;
         const text = `${title} ${content}`;
 
-        // Samsung Health notifications
-        if (pkg.includes('shealth') || pkg.includes('samsung.health') || pkg.includes('sec.android.app.shealth')) {
-          // Steps: "3,456 צעדים" or "3456 steps" or just a number with comma
-          const stepsMatch = text.match(/(\d[\d,\.]+)\s*(?:צעדים|steps|צעד)/i) || text.match(/(?:צעדים|steps)[:\s]*(\d[\d,\.]+)/i);
+        // Samsung Health notifications — match broader package names
+        if (pkg.includes('shealth') || pkg.includes('samsung.health') || pkg.includes('sec.android.app.shealth') || pkg.includes('health')) {
+          console.log(`[HealthMonitor] Samsung Health notification: pkg=${pkg} text="${text.substring(0, 80)}"`);
+
+          // Steps: any number followed by steps-related words, OR within the text
+          const stepsMatch = text.match(/(\d[\d,\.]+)\s*(?:צעדים|steps|צעד|걸음)/i)
+            || text.match(/(?:צעדים|steps)[:\s]*(\d[\d,\.]+)/i)
+            || text.match(/(\d{3,6})\s*\//);  // "3456 / 6000" style
           if (stepsMatch) {
             const num = parseInt(stepsMatch[1].replace(/[,\.]/g, ''));
-            if (num > 0 && num < 200000) this.samsungHealthCache.steps = num;
+            if (num > 0 && num < 200000) {
+              this.samsungHealthCache.steps = num;
+              console.log(`[HealthMonitor] → Steps: ${num}`);
+            }
           }
 
-          // Heart rate: "72 bpm" or "דופק: 72" or "72 פעימות"
-          const hrMatch = text.match(/(\d{2,3})\s*(?:bpm|פעימות|דופק)/i) || text.match(/(?:דופק|heart|bpm)[:\s]*(\d{2,3})/i);
+          // Heart rate: various formats
+          const hrMatch = text.match(/(\d{2,3})\s*(?:bpm|פעימות|דופק|BPM)/i)
+            || text.match(/(?:דופק|heart|bpm|HR)[:\s]*(\d{2,3})/i)
+            || text.match(/(\d{2,3})\s*(?:beats|heartbeat)/i);
           if (hrMatch) {
             const num = parseInt(hrMatch[1]);
-            if (num > 30 && num < 220) this.samsungHealthCache.heartRate = num;
+            if (num > 30 && num < 220) {
+              this.samsungHealthCache.heartRate = num;
+              console.log(`[HealthMonitor] → Heart Rate: ${num}`);
+            }
           }
         }
       }
       this.samsungHealthCache.ts = Date.now();
     }, undefined);
+  }
+
+  // Debug: get raw Samsung Health notification data
+  debugNotifications(): { samsungNotifications: any[]; allPackages: string[] } {
+    return safe(() => {
+      const raw = execSync('termux-notification-list 2>/dev/null', { timeout: 8000 }).toString();
+      const notifications = JSON.parse(raw);
+      if (!Array.isArray(notifications)) return { samsungNotifications: [], allPackages: [] };
+
+      const allPackages = [...new Set(notifications.map((n: any) => n.packageName || ''))];
+      const samsung = notifications.filter((n: any) => {
+        const pkg = (n.packageName || '') as string;
+        return pkg.includes('shealth') || pkg.includes('health') || pkg.includes('samsung') || pkg.includes('wearable');
+      }).map((n: any) => ({
+        packageName: n.packageName,
+        title: n.title,
+        content: n.content,
+        subText: n.subText,
+        bigText: n.bigText,
+      }));
+
+      return { samsungNotifications: samsung, allPackages };
+    }, { samsungNotifications: [], allPackages: [] });
   }
 
   // ===== UI AUTOMATOR SCRAPING (Samsung Health app) =====
