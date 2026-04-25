@@ -479,12 +479,12 @@ export default function LiveMode() {
       if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
       const text = fullTranscript.trim();
       if (!text || !activeRef.current) {
-        // No text — just keep listening
         return;
       }
 
       // Stop recognition while processing
       try { recognition.abort(); } catch {}
+      recognitionRef.current = null;
 
       setCurrentText('');
 
@@ -602,11 +602,16 @@ export default function LiveMode() {
     activeRef.current = false;
     setState('idle');
 
+    // Clear silence timer
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null; }
+
     // Stop recognition
+    try { recognitionRef.current?.stop(); } catch {}
     try { recognitionRef.current?.abort(); } catch {}
     recognitionRef.current = null;
 
     // Stop TTS
+    cancelTTS();
     speechSynthesis.cancel();
 
     // Tell server we're no longer in live mode
