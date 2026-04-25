@@ -464,6 +464,14 @@ export default function LiveMode() {
     recognition.maxAlternatives = 1;
 
     let finalTranscript = '';
+    let langSwitched = false;
+
+    // Auto-detect language from script
+    const detectLang = (text: string): string | null => {
+      if (/[\u0600-\u06FF]/.test(text)) return 'ar-SA';
+      if (/[a-zA-Z]{3,}/.test(text) && !/[\u0590-\u05FF]/.test(text)) return 'en-US';
+      return null; // Hebrew or mixed — keep default
+    };
 
     recognition.onresult = (event: any) => {
       let interim = '';
@@ -476,6 +484,27 @@ export default function LiveMode() {
         }
       }
       setCurrentText(finalTranscript || interim);
+
+      // Auto-switch language if detected non-Hebrew early on
+      if (!langSwitched && !finalTranscript && interim.length > 3) {
+        const detected = detectLang(interim);
+        if (detected && detected !== recognition.lang) {
+          langSwitched = true;
+          try { recognition.abort(); } catch {}
+          recognitionRef.current = null;
+          // Restart with detected language
+          const r2 = new SpeechRecognition();
+          r2.lang = detected;
+          r2.continuous = false;
+          r2.interimResults = true;
+          r2.maxAlternatives = 1;
+          r2.onresult = recognition.onresult;
+          r2.onend = recognition.onend;
+          r2.onerror = recognition.onerror;
+          recognitionRef.current = r2;
+          try { r2.start(); } catch {}
+        }
+      }
     };
 
     recognition.onend = () => {

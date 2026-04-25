@@ -12,6 +12,7 @@ import {
   getHealthStatus, getProximityStatus, getProactiveAlerts, getBriefing,
   HealthStatus, ProximityStatus, ProactiveAlert,
 } from '@/lib/api';
+import { showNotification } from '@/components/common/ServiceWorkerRegistration';
 
 // ===== CLOCK =====
 function Clock() {
@@ -227,7 +228,15 @@ export default function MerlinHome() {
         ]);
         if (h.status === 'fulfilled') setHealth(h.value);
         if (p.status === 'fulfilled') setProximity(p.value);
-        if (a.status === 'fulfilled') setAlerts(a.value.alerts || []);
+        if (a.status === 'fulfilled') {
+          const newAlerts = a.value.alerts || [];
+          // Push notification for new high-priority alerts
+          if (newAlerts.length > 0 && document.hidden) {
+            const high = newAlerts.find((al: ProactiveAlert) => al.priority === 'high');
+            if (high) showNotification('Merlin', high.text, '/chat');
+          }
+          setAlerts(newAlerts);
+        }
       } catch {}
     };
 

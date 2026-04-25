@@ -376,3 +376,10 @@ export async function stopVoiceDaemon(): Promise<{ message: string; status: Voic
 export async function activateVoiceDaemon(): Promise<{ message: string; status: VoiceDaemonStatus }> {
   return apiFetch('/api/voice-daemon/activate', { method: 'POST' });
 }
+
+// ===== CONVERSATION EXPORT =====
+
+export function getExportUrl(id: string): string {
+  const token = process.env.NEXT_PUBLIC_AUTH_TOKEN || 'dev-token';
+  return `${getBaseUrl()}/api/conversations/${id}/export?format=txt&token=${token}`;
+}

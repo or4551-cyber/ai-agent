@@ -555,6 +555,24 @@ app.delete('/api/conversations', authMiddleware, (_req, res) => {
   res.json({ success: true });
 });
 
+app.get('/api/conversations/:id/export', authMiddleware, (req, res) => {
+  const conv = conversationHistory.get(req.params.id as string);
+  if (!conv) { res.status(404).json({ error: 'Not found' }); return; }
+  const format = (req.query.format as string) || 'txt';
+  if (format === 'txt') {
+    let txt = `שיחה: ${conv.title || 'ללא כותרת'}\nתאריך: ${new Date(conv.createdAt).toLocaleString('he-IL')}\n${'─'.repeat(40)}\n\n`;
+    for (const msg of conv.messages) {
+      const role = msg.role === 'user' ? '👤 אתה' : msg.role === 'assistant' ? '🤖 Merlin' : '⚙️ מערכת';
+      txt += `${role}:\n${msg.content}\n\n`;
+    }
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="conversation-${conv.id}.txt"`);
+    res.send(txt);
+  } else {
+    res.status(400).json({ error: 'Unsupported format. Use txt.' });
+  }
+});
+
 // ===== DEVICE CONTROL PANEL API =====
 
 function authQuery(req: express.Request, res: express.Response, next: express.NextFunction): void {
@@ -1120,6 +1138,22 @@ wss.on('connection', (ws: WebSocket, req) => {
 
         try {
           await agent.processMessage(userMessage, images);
+          // Auto-save conversation after each exchange
+          const snap = agent.getConversationSnapshot();
+          if (snap.messages.length >= 2) {
+            conversationHistory.save({
+              id: snap.id,
+              title: '',
+              messages: snap.messages.map((m, i) => ({
+                id: `${snap.id}-${i}`,
+                role: m.role as 'user' | 'assistant',
+                content: m.content,
+                timestamp: Date.now(),
+              })),
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+          }
         } catch (err) {
           const errorMsg = (err as Error).message;
           console.error(`[${connectionId}] Agent error:`, errorMsg);

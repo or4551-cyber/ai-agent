@@ -19,6 +19,19 @@ const LOCAL_LLM_PATTERNS = [
   /^(היי|שלום|הי|בוקר טוב|ערב טוב)/i,
 ];
 
+// Patterns for Haiku — needs Claude intelligence but NOT tools (75% cheaper)
+const HAIKU_PATTERNS = [
+  /^(מה דעתך|מה אתה חושב|what do you think)/i,
+  /^(תסביר|explain|הסבר לי)/i,
+  /^(תכתוב|write|כתוב לי)/i,
+  /^(תסכם|summarize|סכם)/i,
+  /^(איך |how |למה |why )/i,
+  /^(מה ההבדל|what.s the difference)/i,
+  /^(תן לי רעיון|suggest|הצע)/i,
+  /^(תתרגם|translate|תרגם)/i,
+];
+const HAIKU_MODEL = 'claude-3-5-haiku-20241022';
+
 interface MessageParam {
   role: 'user' | 'assistant';
   content: string | ContentBlock[];
@@ -111,6 +124,12 @@ export class ClaudeAgent {
     return this._processWithClaude(message, images);
   }
 
+  private shouldUseHaiku(message: string, images?: { base64: string; mediaType: string }[]): boolean {
+    if (images && images.length > 0) return false;
+    if (this.liveMode) return false; // Live mode already uses low max_tokens
+    return HAIKU_PATTERNS.some(p => p.test(message.trim()));
+  }
+
   async processMessage(
     userMessage: string,
     images?: { base64: string; mediaType: string }[]
@@ -119,12 +138,18 @@ export class ClaudeAgent {
     if (this.canUseLocalLLM(userMessage, images)) {
       return this.processLocal(userMessage);
     }
-    return this._processWithClaude(userMessage, images);
+    // Use Haiku for conversational queries (no tools needed, 75% cheaper)
+    const useHaiku = this.shouldUseHaiku(userMessage, images);
+    if (useHaiku) {
+      console.log('[Agent] Routing to Haiku (conversation, no tools)');
+    }
+    return this._processWithClaude(userMessage, images, useHaiku);
   }
 
   private async _processWithClaude(
     userMessage: string,
-    images?: { base64: string; mediaType: string }[]
+    images?: { base64: string; mediaType: string }[],
+    useHaiku = false,
   ): Promise<string> {
     // Build user content — text only or multimodal with images
     let userContent: string | ContentBlock[];
@@ -156,16 +181,17 @@ export class ClaudeAgent {
 
     while (continueLoop) {
       // Use streaming for real-time text delivery
+      const activeModel = useHaiku ? HAIKU_MODEL : this.model;
       const stream = this.client.messages.stream({
-        model: this.model,
-        max_tokens: this.liveMode ? 1024 : 8192,
+        model: activeModel,
+        max_tokens: this.liveMode ? 1024 : (useHaiku ? 2048 : 8192),
         system: buildSystemPrompt({
           userProfileContext: this.userProfile.toContextString(),
           memoryContext: this.memory.toContextString(),
           favoritesContext: this.favorites.toContextString(),
           liveMode: this.liveMode,
         }),
-        tools: getToolDefinitions() as Anthropic.Tool[],
+        ...(useHaiku ? {} : { tools: getToolDefinitions() as Anthropic.Tool[] }),
         messages: this.conversationHistory as Anthropic.MessageParam[],
       });
 
@@ -186,7 +212,7 @@ export class ClaudeAgent {
       const outTok = response.usage?.output_tokens || 0;
       this.usage.inputTokens += inTok;
       this.usage.outputTokens += outTok;
-      const pricing = ClaudeAgent.PRICING[this.model] || { input: 3, output: 15 };
+      const pricing = ClaudeAgent.PRICING[activeModel] || { input: 3, output: 15 };
       const msgCost = (inTok * pricing.input + outTok * pricing.output) / 1_000_000;
       this.usage.totalCost += msgCost;
 
@@ -365,5 +391,16 @@ export class ClaudeAgent {
 
   getHistory(): MessageParam[] {
     return this.conversationHistory;
+  }
+
+  getConversationId(): string {
+    return this.conversationId;
+  }
+
+  getConversationSnapshot(): { id: string; messages: { role: string; content: string }[] } {
+    const messages = this.conversationHistory
+      .filter(m => typeof m.content === 'string')
+      .map(m => ({ role: m.role, content: m.content as string }));
+    return { id: this.conversationId, messages };
   }
 }
