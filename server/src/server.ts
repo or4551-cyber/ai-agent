@@ -1212,7 +1212,10 @@ voiceDaemon.setEventHandler((data) => {
       client.send(msg);
     }
   });
-  console.log(`[VoiceDaemon] ${data.event}${data.text ? ': ' + data.text.substring(0, 60) : ''}`);
+  // Only log important events, skip repetitive 'listening' ticks
+  if (data.event !== 'listening') {
+    console.log(`[VoiceDaemon] ${data.event}${data.text ? ': ' + data.text.substring(0, 60) : ''}`);
+  }
 });
 
 // Create a dedicated agent for the daemon (lazy, on first start)
