@@ -22,6 +22,9 @@ const ALERT_TYPE_COMMANDS: Record<string, string> = {
   storage_low: 'תסרוק את האחסון ותציע מה למחוק',
   notification_spam: 'תראה לי התראות ספאם ותעזור לי להשתיק',
   memory_high: 'הזיכרון גבוה, מה אפשר לסגור?',
+  wellbeing_check: 'איך אני מבחינת בריאות? תבדוק דופק, תנועה ורמת לחץ',
+  health_alert: 'תראה לי את נתוני הבריאות שלי ותנתח אותם',
+  sedentary_alert: 'אני יושב יותר מדי, תציע לי פעילות קצרה',
 };
 
 export default function DashboardPage() {

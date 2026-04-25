@@ -31,6 +31,58 @@ export interface ExecutionResult {
   dangerLevel: DangerLevel;
 }
 
+// ===== SELF-HEALING: diagnose common errors and auto-fix =====
+interface HealingRule {
+  pattern: RegExp;
+  fix: () => Promise<string>;
+  description: string;
+}
+
+const HEALING_RULES: HealingRule[] = [
+  {
+    pattern: /command not found|No such file.*termux/i,
+    fix: async () => {
+      await runCommand('pkg install termux-api -y 2>/dev/null', undefined, 30000);
+      return 'Installed termux-api package';
+    },
+    description: 'Missing termux-api package',
+  },
+  {
+    pattern: /permission denied/i,
+    fix: async () => {
+      await runCommand('termux-setup-storage 2>/dev/null', undefined, 10000);
+      return 'Requested storage permissions';
+    },
+    description: 'Missing storage permission',
+  },
+  {
+    pattern: /ENOENT.*\.ai-agent/i,
+    fix: async () => {
+      const home = process.env.HOME || '.';
+      await runCommand(`mkdir -p ${home}/.ai-agent`, undefined, 5000);
+      return 'Created .ai-agent directory';
+    },
+    description: 'Missing data directory',
+  },
+  {
+    pattern: /Cannot find module|MODULE_NOT_FOUND/i,
+    fix: async () => {
+      await runCommand('npm install 2>/dev/null', undefined, 60000);
+      return 'Ran npm install to restore dependencies';
+    },
+    description: 'Missing npm dependency',
+  },
+  {
+    pattern: /ETIMEDOUT|ECONNREFUSED|socket hang up/i,
+    fix: async () => {
+      // Wait and retry — network hiccup
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return 'Network timeout — retrying after brief pause';
+    },
+    description: 'Network connectivity issue',
+  },
+];
+
 export async function executeTool(
   toolName: string,
   input: Record<string, unknown>
@@ -41,8 +93,32 @@ export async function executeTool(
     const output = await executeToolInternal(toolName, input);
     return { output, dangerLevel };
   } catch (err) {
+    const errorMsg = (err as Error).message;
+
+    // Self-healing: try to fix and retry once
+    for (const rule of HEALING_RULES) {
+      if (rule.pattern.test(errorMsg)) {
+        console.log(`[SelfHeal] Detected: ${rule.description}. Attempting fix...`);
+        try {
+          const fixResult = await rule.fix();
+          console.log(`[SelfHeal] Fix applied: ${fixResult}. Retrying tool...`);
+
+          // Retry the tool after fix
+          try {
+            const retryOutput = await executeToolInternal(toolName, input);
+            return { output: `[🔧 Auto-fixed: ${rule.description}]\n${retryOutput}`, dangerLevel };
+          } catch (retryErr) {
+            console.log(`[SelfHeal] Retry failed: ${(retryErr as Error).message}`);
+          }
+        } catch (fixErr) {
+          console.log(`[SelfHeal] Fix failed: ${(fixErr as Error).message}`);
+        }
+        break; // Only try one healing rule
+      }
+    }
+
     return {
-      output: `Error: ${(err as Error).message}`,
+      output: `Error: ${errorMsg}`,
       dangerLevel,
     };
   }

@@ -400,6 +400,28 @@ app.post('/api/alerts/read-all', authMiddleware, (_req, res) => {
   res.json({ success: true });
 });
 
+// ===== HEALTH & PROXIMITY API =====
+
+app.get('/api/health', authMiddleware, (_req, res) => {
+  const health = proactiveAgent.getHealthMonitor().getHealthStatus();
+  res.json(health);
+});
+
+app.get('/api/health/sensors', authMiddleware, (_req, res) => {
+  const sensors = proactiveAgent.getHealthMonitor().getAvailableSensors();
+  res.json({ sensors });
+});
+
+app.get('/api/proximity', authMiddleware, (_req, res) => {
+  const proximity = proactiveAgent.getDeviceScanner().getProximityStatus();
+  res.json(proximity);
+});
+
+app.get('/api/proximity/scan', authMiddleware, (_req, res) => {
+  const latest = proactiveAgent.getDeviceScanner().getLatestScan();
+  res.json({ scan: latest, totalScans: proactiveAgent.getDeviceScanner().getScanCount() });
+});
+
 // ===== CONVERSATION HISTORY API =====
 
 app.get('/api/conversations', authMiddleware, (req, res) => {

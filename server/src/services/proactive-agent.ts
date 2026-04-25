@@ -1,6 +1,8 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { DeviceScanner, ProximityStatus } from './device-scanner';
+import { HealthMonitor, HealthStatus } from './health-monitor';
 
 const DATA_DIR = path.join(process.env.HOME || '.', '.ai-agent');
 const STATE_FILE = path.join(DATA_DIR, 'proactive-state.json');
@@ -30,7 +32,10 @@ export type ProactiveType =
   | 'battery_suggestion'
   | 'usage_insight'
   | 'good_morning'
-  | 'good_night';
+  | 'good_night'
+  | 'wellbeing_check'
+  | 'health_alert'
+  | 'sedentary_alert';
 
 interface ProactiveState {
   lastMorning: string | null;
@@ -38,6 +43,8 @@ interface ProactiveState {
   lastDailySummary: string | null;
   lastCalendarCheck: string | null;
   notifiedMeetings: string[];
+  lastWellbeingCheck: string | null;
+  lastSedentaryAlert: string | null;
 }
 
 export class ProactiveAgentService {
@@ -46,10 +53,14 @@ export class ProactiveAgentService {
   private state: ProactiveState;
   private onNotify: ((action: ProactiveAction) => void) | null = null;
   private onAiPrompt: ((prompt: string) => Promise<string>) | null = null;
+  private deviceScanner: DeviceScanner;
+  private healthMonitor: HealthMonitor;
 
   constructor() {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     this.state = this.loadState();
+    this.deviceScanner = new DeviceScanner();
+    this.healthMonitor = new HealthMonitor();
   }
 
   private loadState(): ProactiveState {
@@ -58,7 +69,7 @@ export class ProactiveAgentService {
         return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
       }
     } catch {}
-    return { lastMorning: null, lastNight: null, lastDailySummary: null, lastCalendarCheck: null, notifiedMeetings: [] };
+    return { lastMorning: null, lastNight: null, lastDailySummary: null, lastCalendarCheck: null, notifiedMeetings: [], lastWellbeingCheck: null, lastSedentaryAlert: null };
   }
 
   private saveState(): void {
@@ -76,12 +87,16 @@ export class ProactiveAgentService {
   start(): void {
     if (this.timer) return;
     console.log('[ProactiveAgent] Starting (check every 2 min)');
+    this.deviceScanner.start();
+    this.healthMonitor.start();
     this.check();
     this.timer = setInterval(() => this.check(), CHECK_INTERVAL);
   }
 
   stop(): void {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    this.deviceScanner.stop();
+    this.healthMonitor.stop();
   }
 
   getActions(limit = 20): ProactiveAction[] {
@@ -144,6 +159,12 @@ export class ProactiveAgentService {
 
     // Battery-based suggestions
     this.checkBatterySuggestions();
+
+    // Wellbeing check (alone + health anomalies)
+    this.checkWellbeing();
+
+    // Sedentary alert
+    this.checkSedentary();
   }
 
   private async goodMorning(): Promise<void> {
@@ -264,6 +285,93 @@ export class ProactiveAgentService {
       }
     } catch {}
   }
+
+  // ===== WELLBEING CHECK =====
+  private async checkWellbeing(): Promise<void> {
+    const proximity = this.deviceScanner.getProximityStatus();
+    const health = this.healthMonitor.getHealthStatus();
+
+    // Only check if we have meaningful data
+    if (proximity.nearbyDeviceCount === -1) return;
+
+    // Condition: alone for > 2 hours AND (abnormal heart rate OR high stress)
+    const aloneHours = proximity.aloneMinutes / 60;
+    const healthConcern = health.isHeartRateAbnormal || health.stressLevel === 'high';
+    const aloneAndConcerning = aloneHours >= 2 && healthConcern;
+
+    // Condition: alone for > 6 hours (even without health data)
+    const longAlone = aloneHours >= 6;
+
+    if (!aloneAndConcerning && !longAlone) return;
+
+    // Rate limit: max once every 2 hours
+    const lastCheck = this.state.lastWellbeingCheck;
+    if (lastCheck && Date.now() - new Date(lastCheck).getTime() < 2 * 60 * 60 * 1000) return;
+
+    this.state.lastWellbeingCheck = new Date().toISOString();
+    this.saveState();
+
+    // Build context-aware message
+    let reason = '';
+    if (aloneAndConcerning) {
+      const hrPart = health.currentHeartRate ? `\u05d4\u05d3\u05d5\u05e4\u05e7 \u05e9\u05dc\u05da ${health.currentHeartRate}` : '';
+      const stressPart = health.stressLevel === 'high' ? '\u05d5\u05e0\u05e8\u05d0\u05d4 \u05e9\u05d0\u05ea\u05d4 \u05d1\u05dc\u05d7\u05e5' : '';
+      reason = `${hrPart}${hrPart && stressPart ? ' ' : ''}${stressPart}. \u05d0\u05ea\u05d4 \u05dc\u05d1\u05d3 \u05db\u05d1\u05e8 ${Math.round(aloneHours)} \u05e9\u05e2\u05d5\u05ea.`;
+    } else {
+      reason = `\u05d0\u05ea\u05d4 \u05dc\u05d1\u05d3 \u05db\u05d1\u05e8 ${Math.round(aloneHours)} \u05e9\u05e2\u05d5\u05ea. \u05e8\u05e6\u05d9\u05ea\u05d9 \u05dc\u05d1\u05d3\u05d5\u05e7 \u05e9\u05d4\u05db\u05dc \u05d1\u05e1\u05d3\u05e8.`;
+    }
+
+    // If AI is available, generate a caring message
+    if (this.onAiPrompt && aloneAndConcerning) {
+      try {
+        const prompt = `\u05d4\u05de\u05e9\u05ea\u05de\u05e9 \u05dc\u05d1\u05d3 \u05db\u05d1\u05e8 ${Math.round(aloneHours)} \u05e9\u05e2\u05d5\u05ea` +
+          (health.currentHeartRate ? `, \u05d3\u05d5\u05e4\u05e7: ${health.currentHeartRate}` : '') +
+          (health.stressLevel !== 'unknown' ? `, \u05e8\u05de\u05ea \u05dc\u05d7\u05e5: ${health.stressLevel}` : '') +
+          `. \u05ea\u05e9\u05d0\u05dc \u05d0\u05d5\u05ea\u05d5 \u05d1\u05d7\u05de\u05d9\u05de\u05d5\u05ea \u05d0\u05dd \u05d4\u05db\u05dc \u05d1\u05e1\u05d3\u05e8, \u05d1\u05de\u05e9\u05e4\u05d8 \u05d0\u05d7\u05d3 \u05e7\u05e6\u05e8 \u05d1\u05e2\u05d1\u05e8\u05d9\u05ea. \u05ea\u05d4\u05d9\u05d4 \u05d0\u05e0\u05d5\u05e9\u05d9 \u05d5\u05d7\u05dd, \u05dc\u05d0 \u05e8\u05d5\u05d1\u05d5\u05d8\u05d9.`;
+        const response = await this.onAiPrompt(prompt);
+        this.push({
+          type: 'wellbeing_check',
+          title: '\ud83d\udc9a \u05d0\u05d9\u05da \u05d0\u05ea\u05d4 \u05de\u05e8\u05d2\u05d9\u05e9?',
+          message: response.substring(0, 300),
+          aiGenerated: true,
+          suggestedAction: 'voice_chat',
+        });
+        return;
+      } catch {}
+    }
+
+    this.push({
+      type: 'wellbeing_check',
+      title: '\ud83d\udc9a \u05d0\u05d9\u05da \u05d0\u05ea\u05d4?',
+      message: reason,
+      aiGenerated: false,
+      suggestedAction: 'voice_chat',
+    });
+  }
+
+  // ===== SEDENTARY ALERT =====
+  private checkSedentary(): void {
+    const health = this.healthMonitor.getHealthStatus();
+    if (health.sedentaryMinutes < 90) return; // Only alert after 90 min
+
+    // Rate limit: once every 2 hours
+    const lastAlert = this.state.lastSedentaryAlert;
+    if (lastAlert && Date.now() - new Date(lastAlert).getTime() < 2 * 60 * 60 * 1000) return;
+
+    this.state.lastSedentaryAlert = new Date().toISOString();
+    this.saveState();
+
+    this.push({
+      type: 'sedentary_alert',
+      title: '\ud83e\uddd8 \u05d4\u05d2\u05d9\u05e2 \u05d4\u05d6\u05de\u05df \u05dc\u05d6\u05d5\u05d6',
+      message: `\u05d0\u05ea\u05d4 \u05dc\u05d0 \u05d6\u05d6\u05ea \u05db\u05d1\u05e8 ${health.sedentaryMinutes} \u05d3\u05e7\u05d5\u05ea. \u05e7\u05d5\u05dd \u05dc\u05de\u05ea\u05d9\u05d7\u05d4 \u05e7\u05e6\u05e8\u05d4!`,
+      aiGenerated: false,
+    });
+  }
+
+  // ===== GETTERS FOR NEW SERVICES =====
+  getDeviceScanner(): DeviceScanner { return this.deviceScanner; }
+  getHealthMonitor(): HealthMonitor { return this.healthMonitor; }
 
   private checkBatterySuggestions(): void {
     const battery = safe(() => {

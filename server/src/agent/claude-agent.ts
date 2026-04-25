@@ -6,6 +6,17 @@ import { WSResponse } from '../types';
 import { AgentMemory } from './memory';
 import { UserProfileService } from '../services/user-profile';
 import { ConversationLearner } from '../services/conversation-learner';
+import { LocalLLM } from './local-llm';
+
+// Patterns that indicate a simple query answerable by local LLM (no tools needed)
+const LOCAL_LLM_PATTERNS = [
+  /^(מה השעה|מה התאריך|מה היום)/i,
+  /^(תודה|בסדר|אוקיי|ok|thanks|bye|להתראות|שלום)/i,
+  /^(ספר לי בדיחה|תספר בדיחה|joke)/i,
+  /^(מה זה |הסבר |define |explain )/i,
+  /^(תרגם |translate )/i,
+  /^(היי|שלום|הי|בוקר טוב|ערב טוב)/i,
+];
 
 interface MessageParam {
   role: 'user' | 'assistant';
@@ -37,6 +48,8 @@ export class ClaudeAgent {
     'claude-3-5-haiku-20241022': { input: 0.80, output: 4 },
   };
 
+  private localLLM: LocalLLM;
+
   constructor(
     apiKey: string,
     onEvent: (event: WSResponse) => void,
@@ -49,12 +62,63 @@ export class ClaudeAgent {
     this.userProfile = new UserProfileService();
     this.conversationId = `conv-${Date.now()}`;
     this.learner = new ConversationLearner(apiKey, this.userProfile);
+    this.localLLM = new LocalLLM();
     
     // Record that user is active
     this.userProfile.recordActivity();
   }
 
+  // ===== HYBRID LLM ROUTER =====
+  private canUseLocalLLM(message: string, images?: { base64: string; mediaType: string }[]): boolean {
+    // Never use local LLM for images or long conversations that need context
+    if (images && images.length > 0) return false;
+    if (this.conversationHistory.length > 4) return false; // Multi-turn needs Claude
+    if (!this.localLLM.isAvailable()) return false;
+    
+    // Check if message is a simple pattern
+    return LOCAL_LLM_PATTERNS.some(p => p.test(message.trim()));
+  }
+
+  private async processLocal(message: string): Promise<string> {
+    console.log('[Agent] Routing to local LLM (free, offline)');
+    try {
+      const response = this.localLLM.generate(message);
+      
+      this.onEvent({ type: 'text_delta', payload: { text: response } });
+      this.onEvent({ type: 'message_done', payload: { text: response } });
+      this.onEvent({
+        type: 'usage_update' as any,
+        payload: { inputTokens: 0, outputTokens: 0, messageCost: 0, totalInputTokens: this.usage.inputTokens, totalOutputTokens: this.usage.outputTokens, totalCost: this.usage.totalCost },
+      });
+
+      this.conversationHistory.push({ role: 'user', content: message });
+      this.conversationHistory.push({ role: 'assistant', content: response });
+      this.userProfile.recordMessage();
+
+      return response;
+    } catch {
+      // Fallback to Claude if local fails
+      console.log('[Agent] Local LLM failed, falling back to Claude');
+      return this.processCloud(message);
+    }
+  }
+
+  private async processCloud(message: string, images?: { base64: string; mediaType: string }[]): Promise<string> {
+    return this._processWithClaude(message, images);
+  }
+
   async processMessage(
+    userMessage: string,
+    images?: { base64: string; mediaType: string }[]
+  ): Promise<string> {
+    // Try local LLM for simple queries (saves API cost, works offline)
+    if (this.canUseLocalLLM(userMessage, images)) {
+      return this.processLocal(userMessage);
+    }
+    return this._processWithClaude(userMessage, images);
+  }
+
+  private async _processWithClaude(
     userMessage: string,
     images?: { base64: string; mediaType: string }[]
   ): Promise<string> {

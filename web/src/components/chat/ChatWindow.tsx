@@ -117,6 +117,11 @@ export default function ChatWindow() {
       night: 'תן לי סיכום לפני שינה',
       mail: 'תראה לי מיילים חדשים',
       calendar: 'מה ביומן שלי היום?',
+      good_morning: 'תן לי סיכום בוקר מפורט — סוללה, יומן, תזכורות',
+      good_night: 'תן לי סיכום לפני שינה — מה עשיתי היום ומה מחר',
+      wellbeing_check: 'איך אני מבחינת בריאות? תבדוק דופק, תנועה ורמת לחץ',
+      health_alert: 'תראה לי את נתוני הבריאות שלי ותנתח אותם',
+      sedentary_alert: 'אני יושב יותר מדי, תציע לי פעילות קצרה',
     };
     return typeMap[alert.type] || `${alert.text} — תטפל בזה`;
   };
