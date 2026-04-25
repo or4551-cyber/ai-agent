@@ -21,6 +21,8 @@ import { ConversationHistoryService } from './services/conversation-history';
 import { getAuthUrl, handleCallback, getGoogleStatus } from './tools/google-auth';
 import { ProactiveAgentService } from './services/proactive-agent';
 import { BackupService } from './services/backup';
+import { VoiceDaemon } from './services/voice-daemon';
+import { FavoritesService } from './services/favorites';
 
 dotenv.config();
 
@@ -46,6 +48,8 @@ if (process.env.ANTHROPIC_API_KEY) {
 const proactiveAgent = new ProactiveAgentService();
 proactiveAgent.start();
 const backupService = new BackupService();
+const voiceDaemon = new VoiceDaemon();
+const favoritesService = new FavoritesService();
 
 const localLLM = new LocalLLM();
 
@@ -420,6 +424,84 @@ app.get('/api/proximity', authMiddleware, (_req, res) => {
 app.get('/api/proximity/scan', authMiddleware, (_req, res) => {
   const latest = proactiveAgent.getDeviceScanner().getLatestScan();
   res.json({ scan: latest, totalScans: proactiveAgent.getDeviceScanner().getScanCount() });
+});
+
+// ===== VOICE DAEMON API =====
+
+app.get('/api/voice-daemon/status', authMiddleware, (_req, res) => {
+  res.json(voiceDaemon.getStatus());
+});
+
+app.post('/api/voice-daemon/start', authMiddleware, async (req, res) => {
+  const mode = (req.body?.mode as string) || 'wake_word';
+  const result = await voiceDaemon.start(mode as any);
+  res.json({ message: result, status: voiceDaemon.getStatus() });
+});
+
+app.post('/api/voice-daemon/stop', authMiddleware, (_req, res) => {
+  const result = voiceDaemon.stop();
+  res.json({ message: result, status: voiceDaemon.getStatus() });
+});
+
+app.post('/api/voice-daemon/activate', authMiddleware, (_req, res) => {
+  voiceDaemon.setMode('active');
+  res.json({ message: 'Switched to active mode', status: voiceDaemon.getStatus() });
+});
+
+app.post('/api/voice-daemon/wake', authMiddleware, (_req, res) => {
+  voiceDaemon.setMode('wake_word');
+  res.json({ message: 'Switched to wake word mode', status: voiceDaemon.getStatus() });
+});
+
+// ===== FAVORITES API =====
+
+app.get('/api/favorites', authMiddleware, (req, res) => {
+  const type = req.query.type as string | undefined;
+  if (type) {
+    res.json({ items: favoritesService.getByType(type as any) });
+  } else {
+    res.json(favoritesService.getAll());
+  }
+});
+
+app.get('/api/favorites/stats', authMiddleware, (_req, res) => {
+  res.json(favoritesService.getStats());
+});
+
+app.post('/api/favorites/vip', authMiddleware, (req, res) => {
+  const vip = favoritesService.addVip(req.body);
+  res.json(vip);
+});
+
+app.put('/api/favorites/vip/:id', authMiddleware, (req, res) => {
+  const updated = favoritesService.updateVip(req.params.id as string, req.body);
+  if (!updated) { res.status(404).json({ error: 'VIP not found' }); return; }
+  res.json(updated);
+});
+
+app.delete('/api/favorites/:type/:id', authMiddleware, (req, res) => {
+  const type = req.params.type as string;
+  const id = req.params.id as string;
+  let ok = false;
+  switch (type) {
+    case 'vip': ok = favoritesService.removeVip(id); break;
+    case 'shortcut': ok = favoritesService.removeShortcut(id); break;
+    case 'app': ok = favoritesService.removeApp(id); break;
+    case 'location': ok = favoritesService.removeLocation(id); break;
+  }
+  res.json({ success: ok });
+});
+
+app.post('/api/favorites/shortcut', authMiddleware, (req, res) => {
+  res.json(favoritesService.addShortcut(req.body));
+});
+
+app.post('/api/favorites/app', authMiddleware, (req, res) => {
+  res.json(favoritesService.addApp(req.body));
+});
+
+app.post('/api/favorites/location', authMiddleware, (req, res) => {
+  res.json(favoritesService.addLocation(req.body));
 });
 
 // ===== CONVERSATION HISTORY API =====
@@ -1092,6 +1174,51 @@ if (fs.existsSync(FRONTEND_DIR)) {
       </body></html>
     `);
   });
+}
+
+// ===== VOICE DAEMON WIRING =====
+
+// Broadcast daemon events to all connected WS clients
+voiceDaemon.setEventHandler((data) => {
+  const msg = JSON.stringify({ type: 'voice_daemon', payload: data });
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
+    }
+  });
+  console.log(`[VoiceDaemon] ${data.event}${data.text ? ': ' + data.text.substring(0, 60) : ''}`);
+});
+
+// Create a dedicated agent for the daemon (lazy, on first start)
+let daemonAgent: ClaudeAgent | null = null;
+function getDaemonAgent(): ClaudeAgent | null {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  if (!daemonAgent) {
+    daemonAgent = new ClaudeAgent(apiKey, (event: WSResponse) => {
+      // Forward agent events as daemon WS events
+      const msg = JSON.stringify({ type: 'voice_daemon_agent', payload: event });
+      wss.clients.forEach((client) => {
+        if (client.readyState === WebSocket.OPEN) {
+          client.send(msg);
+        }
+      });
+    }, 'claude-sonnet-4-20250514');
+  }
+  return daemonAgent;
+}
+
+voiceDaemon.setMessageProcessor(async (message: string) => {
+  const agent = getDaemonAgent();
+  if (!agent) throw new Error('No API key configured');
+  return agent.processMessage(message);
+});
+
+// Auto-start daemon if configured
+if (process.env.AUTO_VOICE_DAEMON === 'true') {
+  setTimeout(() => {
+    voiceDaemon.start('wake_word').then(msg => console.log('[VoiceDaemon]', msg));
+  }, 5000);
 }
 
 // ===== START =====

@@ -47,6 +47,8 @@ const BASE_PROMPT = `אתה סוכן AI שרץ ישירות על הטלפון ש
 - **ריפוי עצמי**: כשכלי נכשל (חבילה חסרה, הרשאה, תקלת רשת) — Merlin מנסה לתקן ולהריץ שוב אוטומטית
 - **שליטה במסך (UI Automator)**: שליטה מלאה באפליקציות אחרות! פתיחה, לחיצה, הקלדה, גלילה, קריאת מסך
 - **פלגינים**: התקנה דינמית של יכולות חדשות (plugin_catalog/install/list/uninstall)
+- **מועדפים**: ניהול אנשי קשר VIP, פקודות מהירות, אפליקציות מועדפות ומיקומים (favorites_list/add/remove/find_vip/update_vip)
+- **Voice Daemon**: שירות קולי שרץ ברקע — מזהה "היי מרלין" ומקשיב לפקודות קוליות גם ללא דפדפן
 
 ## שליטה באפליקציות (UI Automator)
 - אתה יכול **לפתוח כל אפליקציה** (ui_open_app), **לקרוא מה על המסך** (ui_read_screen), **ללחוץ** על כפתורים (ui_tap), **להקליד** (ui_type), **לגלול** (ui_swipe)
@@ -54,6 +56,13 @@ const BASE_PROMPT = `אתה סוכן AI שרץ ישירות על הטלפון ש
 - אם המשתמש מבקש "תפתח וואטסאפ ותשלח הודעה" — פתח, חכה, קרא מסך, מצא שדה, הקלד, שלח
 - אפליקציות נתמכות בשם: whatsapp, telegram, waze, maps, chrome, gmail, phone, camera, settings, youtube, spotify, wolt, gett, instagram, facebook, calendar, gallery
 - אם לא בטוח מה על המסך — צלם מסך (ui_screenshot) ונתח ויזואלית
+
+## מועדפים (Favorites)
+- אנשי קשר VIP מקבלים **עדיפות תגובה** — כשיש הודעות מ-VIP, ציין זאת קודם
+- כש-VIP מוגדר על פלטפורמות מסוימות (WhatsApp, Instagram...), השתמש בפלטפורמה הנכונה לתקשורת
+- פקודות מהירות (shortcuts) — כשהמשתמש אומר מילת טריגר ("קפה", "עבודה"), הפעל את רצף הפעולות
+- **חפש VIP לפני שליחת הודעה**: "תשלח ליוסי" → favorites_find_vip query="יוסי" → תדע לאיזו פלטפורמה ואיזה מספר
+- אם המשתמש מבקש להוסיף מועדף — השתמש ב-favorites_add
 
 ## מערכת פלגינים
 - כשהמשתמש מבקש משהו שאין לך כלי בשבילו — **בדוק קודם אם יש פלגין בקטלוג** עם plugin_catalog
@@ -109,6 +118,7 @@ export function buildSystemPrompt(context: {
   userProfileContext?: string;
   memoryContext?: string;
   timeContext?: string;
+  favoritesContext?: string;
 }): string {
   let prompt = BASE_PROMPT;
 
@@ -132,6 +142,11 @@ export function buildSystemPrompt(context: {
   // Explicit memories
   if (context.memoryContext) {
     prompt += context.memoryContext;
+  }
+
+  // Favorites (VIP contacts, shortcuts, etc.)
+  if (context.favoritesContext) {
+    prompt += context.favoritesContext;
   }
 
   return prompt;

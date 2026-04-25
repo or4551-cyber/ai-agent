@@ -7,6 +7,7 @@ import { AgentMemory } from './memory';
 import { UserProfileService } from '../services/user-profile';
 import { ConversationLearner } from '../services/conversation-learner';
 import { LocalLLM } from './local-llm';
+import { FavoritesService } from '../services/favorites';
 
 // Patterns that indicate a simple query answerable by local LLM (no tools needed)
 const LOCAL_LLM_PATTERNS = [
@@ -49,6 +50,7 @@ export class ClaudeAgent {
   };
 
   private localLLM: LocalLLM;
+  private favorites: FavoritesService;
 
   constructor(
     apiKey: string,
@@ -63,6 +65,7 @@ export class ClaudeAgent {
     this.conversationId = `conv-${Date.now()}`;
     this.learner = new ConversationLearner(apiKey, this.userProfile);
     this.localLLM = new LocalLLM();
+    this.favorites = new FavoritesService();
     
     // Record that user is active
     this.userProfile.recordActivity();
@@ -157,6 +160,7 @@ export class ClaudeAgent {
         system: buildSystemPrompt({
           userProfileContext: this.userProfile.toContextString(),
           memoryContext: this.memory.toContextString(),
+          favoritesContext: this.favorites.toContextString(),
         }),
         tools: getToolDefinitions() as Anthropic.Tool[],
         messages: this.conversationHistory as Anthropic.MessageParam[],

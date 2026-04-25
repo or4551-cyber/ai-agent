@@ -1336,6 +1336,80 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+
+  // ===== FAVORITES — VIP CONTACTS, SHORTCUTS, APPS, LOCATIONS =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'favorites_list',
+      description: 'List all favorites or filter by type. Types: vip (VIP contacts), shortcut (quick commands), app (favorite apps), location (saved places). Use to check who is VIP, what shortcuts exist, etc.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['vip', 'shortcut', 'app', 'location'], description: 'Filter by type (optional — lists all if empty)' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'favorites_add',
+      description: 'Add a new favorite. Use this when the user says things like "תוסיף את אמא כ-VIP", "תוסיף קיצור עבודה", etc. Required fields vary by type. For VIP: name, platforms, priority, relationship. For shortcut: trigger, description, actions. For app: name, packageName, alias. For location: name, address.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['vip', 'shortcut', 'app', 'location'], description: 'Type of favorite to add' },
+          data: { type: 'object', description: 'The favorite data. Fields depend on type.' },
+        },
+        required: ['type', 'data'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'favorites_remove',
+      description: 'Remove a favorite by its ID.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['vip', 'shortcut', 'app', 'location'], description: 'Type of favorite' },
+          id: { type: 'string', description: 'ID of the favorite to remove' },
+        },
+        required: ['type', 'id'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'favorites_find_vip',
+      description: 'Search for a VIP contact by name, alias, or phone. Use when the user says "תשלח ליוסי", "תענה לאמא" — find the VIP to know which platform to use.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Name, alias, or phone to search' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'favorites_update_vip',
+      description: 'Update an existing VIP contact. Provide the VIP ID and the fields to update.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'VIP contact ID' },
+          updates: { type: 'object', description: 'Fields to update (e.g. priority, autoReply, platforms, aliases)' },
+        },
+        required: ['id', 'updates'],
+      },
+    },
+  },
 ];
 
 // Singleton plugin manager — lazy loaded to avoid circular deps

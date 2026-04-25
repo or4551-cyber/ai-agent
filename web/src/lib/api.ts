@@ -348,3 +348,31 @@ export interface ProximityStatus {
 export async function getProximityStatus(): Promise<ProximityStatus> {
   return apiFetch('/api/proximity');
 }
+
+// ===== VOICE DAEMON =====
+
+export interface VoiceDaemonStatus {
+  mode: 'sleep' | 'wake_word' | 'active';
+  active: boolean;
+  sessionStart: string | null;
+  totalCommands: number;
+  lastCommand: string | null;
+  lastResponse: string | null;
+  silentSeconds: number;
+}
+
+export async function getVoiceDaemonStatus(): Promise<VoiceDaemonStatus> {
+  return apiFetch('/api/voice-daemon/status');
+}
+
+export async function startVoiceDaemon(mode: 'wake_word' | 'active' = 'wake_word'): Promise<{ message: string; status: VoiceDaemonStatus }> {
+  return apiFetch('/api/voice-daemon/start', { method: 'POST', body: JSON.stringify({ mode }), headers: { 'Content-Type': 'application/json' } });
+}
+
+export async function stopVoiceDaemon(): Promise<{ message: string; status: VoiceDaemonStatus }> {
+  return apiFetch('/api/voice-daemon/stop', { method: 'POST' });
+}
+
+export async function activateVoiceDaemon(): Promise<{ message: string; status: VoiceDaemonStatus }> {
+  return apiFetch('/api/voice-daemon/activate', { method: 'POST' });
+}

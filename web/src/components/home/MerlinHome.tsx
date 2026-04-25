@@ -6,7 +6,7 @@ import {
   Heart, Footprints, Users, Brain, Activity, Search,
   MessageCircle, Camera, Folder, Music, Map, Phone,
   Mail, Calendar, Battery, Wifi, BellRing, Sparkles,
-  ArrowRight, Mic, Sun, Moon, CloudSun,
+  ArrowRight, Mic, Sun, Moon, CloudSun, Star,
 } from 'lucide-react';
 import {
   getHealthStatus, getProximityStatus, getProactiveAlerts, getBriefing,
@@ -138,6 +138,7 @@ function QuickApps() {
     { icon: Music, label: 'מוזיקה', color: 'from-teal-500 to-green-600', action: () => router.push('/chat?cmd=מה+מתנגן+עכשיו') },
     { icon: Map, label: 'מיקום', color: 'from-indigo-500 to-blue-600', action: () => router.push('/chat?cmd=איפה+אני+עכשיו') },
     { icon: Folder, label: 'קבצים', color: 'from-zinc-500 to-zinc-600', action: () => router.push('/files') },
+    { icon: Star, label: 'מועדפים', color: 'from-amber-500 to-yellow-600', action: () => router.push('/favorites') },
   ];
 
   return (

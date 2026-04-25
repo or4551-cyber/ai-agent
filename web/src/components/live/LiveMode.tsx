@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Mic, MicOff, Volume2, VolumeX, Sparkles, Phone, Radio } from 'lucide-react';
+import { X, Mic, MicOff, Volume2, VolumeX, Sparkles, Phone, Radio, Server, Monitor } from 'lucide-react';
 import { AgentWebSocket, WSEvent } from '@/lib/websocket';
+import { getVoiceDaemonStatus, startVoiceDaemon, stopVoiceDaemon, activateVoiceDaemon, VoiceDaemonStatus } from '@/lib/api';
 
 type LiveState = 'idle' | 'listening' | 'thinking' | 'speaking' | 'background';
 
@@ -151,6 +152,8 @@ export default function LiveMode() {
   const [currentText, setCurrentText] = useState('');
   const [sessionDuration, setSessionDuration] = useState(0);
   const [bgSeconds, setBgSeconds] = useState(0);
+  const [daemonMode, setDaemonMode] = useState(false); // true = server-side daemon
+  const [daemonStatus, setDaemonStatus] = useState<VoiceDaemonStatus | null>(null);
 
   const wsRef = useRef<AgentWebSocket | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -198,8 +201,34 @@ export default function LiveMode() {
       }
     });
 
+    // Listen for daemon events from server
+    ws.on('*', (event: WSEvent) => {
+      if ((event.type as string) === 'voice_daemon') {
+        const data = event.payload as any;
+        if (data.event === 'user_speech' && data.text) {
+          setTranscript(prev => [...prev, { role: 'user', text: data.text }]);
+        } else if (data.event === 'response' && data.text) {
+          setTranscript(prev => [...prev, { role: 'assistant', text: data.text }]);
+        } else if (data.event === 'mode_changed') {
+          setDaemonStatus(prev => prev ? { ...prev, mode: data.mode } : null);
+          if (data.mode === 'active') setState('listening');
+          else if (data.mode === 'wake_word') setState('idle');
+          else if (data.mode === 'sleep') setState('idle');
+        } else if (data.event === 'listening') {
+          setState('listening');
+        } else if (data.event === 'thinking') {
+          setState('thinking');
+        } else if (data.event === 'speaking') {
+          setState('speaking');
+        }
+      }
+    });
+
     ws.connect();
     wsRef.current = ws;
+
+    // Poll daemon status on mount
+    getVoiceDaemonStatus().then(s => setDaemonStatus(s)).catch(() => {});
 
     return () => {
       ws.disconnect();
@@ -517,8 +546,53 @@ export default function LiveMode() {
         </button>
       </div>
 
+      {/* Mode toggle: Browser vs Daemon */}
+      <div className="mx-5 mb-2 flex gap-2">
+        <button
+          onClick={() => {
+            if (daemonMode) {
+              // Switch to browser mode, stop daemon
+              stopVoiceDaemon().then(r => setDaemonStatus(r.status)).catch(() => {});
+              setDaemonMode(false);
+            }
+          }}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium transition-all ${
+            !daemonMode ? 'bg-[var(--primary)]/20 text-[var(--primary)] border border-[var(--primary)]/30' : 'bg-zinc-800/50 text-zinc-500'
+          }`}
+        >
+          <Monitor size={14} /> דפדפן
+        </button>
+        <button
+          onClick={async () => {
+            setDaemonMode(true);
+            // Stop browser session if active
+            if (active) endSession();
+            // Start daemon
+            try {
+              const r = await startVoiceDaemon('active');
+              setDaemonStatus(r.status);
+              setTranscript(prev => [...prev, { role: 'system', text: '🖥️ עברתי למצב Daemon — עובד ברקע גם ללא דפדפן' }]);
+              setActive(true);
+              activeRef.current = true;
+            } catch { }
+          }}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium transition-all ${
+            daemonMode ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-zinc-800/50 text-zinc-500'
+          }`}
+        >
+          <Server size={14} /> Daemon (ללא ידיים)
+        </button>
+      </div>
+
+      {/* Daemon status */}
+      {daemonMode && daemonStatus?.active && (
+        <div className="mx-5 mb-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs text-center">
+          🖥️ Daemon פעיל — {daemonStatus.mode === 'active' ? 'מקשיב' : 'ממתין ל-"היי מרלין"'} · {daemonStatus.totalCommands} פקודות
+        </div>
+      )}
+
       {/* Background mode banner */}
-      {state === 'background' && (
+      {state === 'background' && !daemonMode && (
         <div className="mx-5 mb-2 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs text-center animate-pulse">
           ⏳ Merlin פעיל ברקע — חזור לחלון כדי להמשיך לדבר
         </div>

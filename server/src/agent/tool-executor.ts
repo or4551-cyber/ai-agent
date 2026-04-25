@@ -19,6 +19,7 @@ import { BackupService } from '../services/backup';
 import { getPluginManager } from '../tools/definitions';
 import { searchCatalog, getCatalogEntry, catalogToString } from '../services/plugin-catalog';
 import * as uiAuto from '../tools/ui-automator';
+import { FavoritesService, FavoriteType, VipContact, QuickShortcut, FavoriteApp, FavoriteLocation } from '../services/favorites';
 
 const memory = new AgentMemory();
 const reminderService = new ReminderService();
@@ -26,6 +27,7 @@ const routineService = new RoutineService();
 const storageScanner = new StorageScanner();
 const backupService = new BackupService();
 let globalVoiceMode: VoiceModeService | null = null;
+const favoritesService = new FavoritesService();
 
 export interface ExecutionResult {
   output: string;
@@ -545,6 +547,92 @@ async function executeToolInternal(
       return uiAuto.uiWaitForText(input.text as string, (input.timeout_ms as number) || 10000).then(found =>
         found ? `"${input.text}" appeared on screen` : `"${input.text}" did not appear within timeout`
       );
+
+    // ===== FAVORITES =====
+    case 'favorites_list': {
+      const fType = input.type as FavoriteType | undefined;
+      if (fType) {
+        const items = favoritesService.getByType(fType);
+        if (items.length === 0) return `אין מועדפים מסוג ${fType}.`;
+        return JSON.stringify(items, null, 2);
+      }
+      const all = favoritesService.getAll();
+      const stats = favoritesService.getStats();
+      if (stats.total === 0) return 'אין מועדפים עדיין. הוסף עם favorites_add.';
+      return `סה"כ ${stats.total} מועדפים (${stats.vip} VIP, ${stats.shortcuts} קיצורים, ${stats.apps} אפליקציות, ${stats.locations} מיקומים):\n\n${JSON.stringify(all, null, 2)}`;
+    }
+    case 'favorites_add': {
+      const addType = input.type as FavoriteType;
+      const data = input.data as Record<string, unknown>;
+      switch (addType) {
+        case 'vip': {
+          const vip = favoritesService.addVip({
+            name: data.name as string,
+            phone: data.phone as string | undefined,
+            email: data.email as string | undefined,
+            platforms: (data.platforms as any[]) || ['whatsapp'],
+            priority: (data.priority as any) || 'normal',
+            ringOnSilent: (data.ringOnSilent as boolean) ?? false,
+            autoReply: data.autoReply as string | undefined,
+            relationship: (data.relationship as any) || 'other',
+            aliases: (data.aliases as string[]) || [],
+            notes: data.notes as string | undefined,
+          });
+          return `✅ הוספתי ${vip.name} כ-VIP (${vip.priority}). ID: ${vip.id}`;
+        }
+        case 'shortcut': {
+          const s = favoritesService.addShortcut({
+            trigger: data.trigger as string,
+            description: data.description as string,
+            actions: (data.actions as string[]) || [],
+            context: data.context as any,
+          });
+          return `✅ הוספתי קיצור "${s.trigger}" — ${s.description}. ID: ${s.id}`;
+        }
+        case 'app': {
+          const a = favoritesService.addApp({
+            name: data.name as string,
+            packageName: data.packageName as string,
+            alias: data.alias as string,
+            voiceShortcut: data.voiceShortcut as string | undefined,
+            contextRules: data.contextRules as string | undefined,
+          });
+          return `✅ הוספתי אפליקציה "${a.alias}" (${a.name}). ID: ${a.id}`;
+        }
+        case 'location': {
+          const l = favoritesService.addLocation({
+            name: data.name as string,
+            address: data.address as string,
+            rules: data.rules as string | undefined,
+          });
+          return `✅ הוספתי מיקום "${l.name}" — ${l.address}. ID: ${l.id}`;
+        }
+        default:
+          return `סוג לא מוכר: ${addType}`;
+      }
+    }
+    case 'favorites_remove': {
+      const rmType = input.type as FavoriteType;
+      const rmId = input.id as string;
+      let removed = false;
+      switch (rmType) {
+        case 'vip': removed = favoritesService.removeVip(rmId); break;
+        case 'shortcut': removed = favoritesService.removeShortcut(rmId); break;
+        case 'app': removed = favoritesService.removeApp(rmId); break;
+        case 'location': removed = favoritesService.removeLocation(rmId); break;
+      }
+      return removed ? `✅ הוסר בהצלחה.` : `❌ לא נמצא מועדף עם ID: ${rmId}`;
+    }
+    case 'favorites_find_vip': {
+      const vip = favoritesService.findVip(input.query as string);
+      if (!vip) return `לא נמצא VIP שמתאים ל"${input.query}".`;
+      return JSON.stringify(vip, null, 2);
+    }
+    case 'favorites_update_vip': {
+      const updated = favoritesService.updateVip(input.id as string, input.updates as any);
+      if (!updated) return `❌ לא נמצא VIP עם ID: ${input.id}`;
+      return `✅ עודכן: ${updated.name}\n${JSON.stringify(updated, null, 2)}`;
+    }
 
     default: {
       // Try executing as a plugin
