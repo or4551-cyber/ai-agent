@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
+import { execSync } from 'child_process';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -1316,6 +1317,20 @@ if (process.env.AUTO_VOICE_DAEMON === 'true') {
 }
 
 // ===== START =====
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`[Server] Port ${PORT} is busy. Killing previous process...`);
+    try {
+      execSync(`kill -9 $(lsof -t -i:${PORT}) 2>/dev/null || true`, { timeout: 3000 });
+    } catch {}
+    setTimeout(() => {
+      server.listen(PORT, '0.0.0.0');
+    }, 1500);
+  } else {
+    console.error('[Server] Fatal error:', err.message);
+  }
+});
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('╔════════════════════════════════════════╗');
