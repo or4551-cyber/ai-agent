@@ -37,52 +37,82 @@ export interface ExecutionResult {
 // ===== SELF-HEALING: diagnose common errors and auto-fix =====
 interface HealingRule {
   pattern: RegExp;
-  fix: () => Promise<string>;
+  fixes: (() => Promise<string>)[]; // multiple fix strategies, try in order
   description: string;
+}
+
+// Error memory: remember what worked so we don't waste time retrying
+const errorMemory: Map<string, { fix: string; timestamp: number }> = new Map();
+const ERROR_MEMORY_TTL = 24 * 60 * 60 * 1000; // 24h
+
+function getErrorKey(toolName: string, errorMsg: string): string {
+  // Normalize error to group similar ones
+  return `${toolName}:${errorMsg.replace(/[0-9]+/g, 'N').substring(0, 80)}`;
 }
 
 const HEALING_RULES: HealingRule[] = [
   {
     pattern: /command not found|No such file.*termux/i,
-    fix: async () => {
-      await runCommand('pkg install termux-api -y 2>/dev/null', undefined, 30000);
-      return 'Installed termux-api package';
-    },
-    description: 'Missing termux-api package',
+    fixes: [
+      async () => { await runCommand('pkg install termux-api -y 2>/dev/null', undefined, 30000); return 'Installed termux-api'; },
+      async () => { await runCommand('pkg update -y && pkg install termux-api -y 2>/dev/null', undefined, 60000); return 'Updated repos + installed termux-api'; },
+      async () => { await runCommand('apt update && apt install -y $(dpkg --get-selections | grep deinstall | awk "{print $1}") 2>/dev/null', undefined, 60000); return 'Reinstalled broken packages'; },
+    ],
+    description: 'Missing termux package',
   },
   {
     pattern: /permission denied/i,
-    fix: async () => {
-      await runCommand('termux-setup-storage 2>/dev/null', undefined, 10000);
-      return 'Requested storage permissions';
-    },
-    description: 'Missing storage permission',
+    fixes: [
+      async () => { await runCommand('termux-setup-storage 2>/dev/null', undefined, 10000); return 'Requested storage permissions'; },
+      async () => { await runCommand('chmod -R 755 ~/ai-agent 2>/dev/null', undefined, 5000); return 'Fixed file permissions'; },
+    ],
+    description: 'Permission denied',
   },
   {
     pattern: /ENOENT.*\.ai-agent/i,
-    fix: async () => {
-      const home = process.env.HOME || '.';
-      await runCommand(`mkdir -p ${home}/.ai-agent`, undefined, 5000);
-      return 'Created .ai-agent directory';
-    },
+    fixes: [
+      async () => { const home = process.env.HOME || '.'; await runCommand(`mkdir -p ${home}/.ai-agent`, undefined, 5000); return 'Created .ai-agent directory'; },
+    ],
     description: 'Missing data directory',
   },
   {
     pattern: /Cannot find module|MODULE_NOT_FOUND/i,
-    fix: async () => {
-      await runCommand('npm install 2>/dev/null', undefined, 60000);
-      return 'Ran npm install to restore dependencies';
-    },
+    fixes: [
+      async () => { await runCommand('cd ~/ai-agent/server && npm install 2>/dev/null', undefined, 60000); return 'Restored npm dependencies'; },
+      async () => { await runCommand('cd ~/ai-agent/server && rm -rf node_modules && npm install 2>/dev/null', undefined, 120000); return 'Clean npm reinstall'; },
+    ],
     description: 'Missing npm dependency',
   },
   {
-    pattern: /ETIMEDOUT|ECONNREFUSED|socket hang up/i,
-    fix: async () => {
-      // Wait and retry — network hiccup
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return 'Network timeout — retrying after brief pause';
-    },
+    pattern: /ETIMEDOUT|ECONNREFUSED|socket hang up|ENOTFOUND/i,
+    fixes: [
+      async () => { await new Promise(r => setTimeout(r, 2000)); return 'Brief network pause'; },
+      async () => { await new Promise(r => setTimeout(r, 5000)); return 'Extended network pause'; },
+      async () => { await runCommand('ping -c 1 8.8.8.8 2>/dev/null || (svc wifi disable && sleep 1 && svc wifi enable) 2>/dev/null', undefined, 10000); return 'WiFi reset'; },
+    ],
     description: 'Network connectivity issue',
+  },
+  {
+    pattern: /ENOSPC|No space left/i,
+    fixes: [
+      async () => { await runCommand('pkg clean && rm -rf ~/ai-agent/server/.cache 2>/dev/null', undefined, 10000); return 'Cleared package cache'; },
+      async () => { await runCommand('find /data/data/com.termux -name "*.log" -delete 2>/dev/null', undefined, 10000); return 'Cleaned log files'; },
+    ],
+    description: 'Disk space full',
+  },
+  {
+    pattern: /ENOMEM|JavaScript heap out of memory/i,
+    fixes: [
+      async () => { await runCommand('kill $(ps aux | grep -v node | grep -v grep | awk "{print $2}" | head -5) 2>/dev/null', undefined, 5000); return 'Killed background processes'; },
+    ],
+    description: 'Out of memory',
+  },
+  {
+    pattern: /EACCES.*node_modules|npm ERR/i,
+    fixes: [
+      async () => { await runCommand('cd ~/ai-agent/server && rm -rf node_modules/.cache && npm rebuild 2>/dev/null', undefined, 60000); return 'Rebuilt node_modules'; },
+    ],
+    description: 'npm corruption',
   },
 ];
 
@@ -97,31 +127,42 @@ export async function executeTool(
     return { output, dangerLevel };
   } catch (err) {
     const errorMsg = (err as Error).message;
+    const errorKey = getErrorKey(toolName, errorMsg);
 
-    // Self-healing: try to fix and retry once
+    // Check error memory — if we already know a fix, apply it directly
+    const remembered = errorMemory.get(errorKey);
+    if (remembered && Date.now() - remembered.timestamp < ERROR_MEMORY_TTL) {
+      console.log(`[SelfHeal] Remembered fix for ${errorKey}: ${remembered.fix}`);
+    }
+
+    // Self-healing: try matching rules, multiple fix strategies per rule
     for (const rule of HEALING_RULES) {
-      if (rule.pattern.test(errorMsg)) {
-        console.log(`[SelfHeal] Detected: ${rule.description}. Attempting fix...`);
-        try {
-          const fixResult = await rule.fix();
-          console.log(`[SelfHeal] Fix applied: ${fixResult}. Retrying tool...`);
+      if (!rule.pattern.test(errorMsg)) continue;
 
-          // Retry the tool after fix
+      console.log(`[SelfHeal] Detected: ${rule.description}. Trying ${rule.fixes.length} fix strategies...`);
+
+      for (let i = 0; i < rule.fixes.length; i++) {
+        try {
+          const fixResult = await rule.fixes[i]();
+          console.log(`[SelfHeal] Fix #${i + 1} applied: ${fixResult}. Retrying tool...`);
+
           try {
             const retryOutput = await executeToolInternal(toolName, input);
-            return { output: `[🔧 Auto-fixed: ${rule.description}]\n${retryOutput}`, dangerLevel };
+            // Remember what worked
+            errorMemory.set(errorKey, { fix: fixResult, timestamp: Date.now() });
+            return { output: `[🔧 Auto-fixed: ${rule.description} — ${fixResult}]\n${retryOutput}`, dangerLevel };
           } catch (retryErr) {
-            console.log(`[SelfHeal] Retry failed: ${(retryErr as Error).message}`);
+            console.log(`[SelfHeal] Retry after fix #${i + 1} failed: ${(retryErr as Error).message}`);
           }
         } catch (fixErr) {
-          console.log(`[SelfHeal] Fix failed: ${(fixErr as Error).message}`);
+          console.log(`[SelfHeal] Fix #${i + 1} failed: ${(fixErr as Error).message}`);
         }
-        break; // Only try one healing rule
       }
+      break; // Only match one rule
     }
 
     return {
-      output: `Error: ${errorMsg}`,
+      output: `Error: ${errorMsg}\n\n💡 טיפ: אפשר לנסות "תתקן את עצמך" ואני אנתח את הבעיה לעומק`,
       dangerLevel,
     };
   }

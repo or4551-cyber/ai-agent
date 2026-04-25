@@ -9,6 +9,7 @@ import { ConversationLearner } from '../services/conversation-learner';
 import { LocalLLM } from './local-llm';
 import { FavoritesService } from '../services/favorites';
 import { PersonalityEngine } from '../services/personality-engine';
+import { estimateTokens, trimHistory, trimSystemContext } from '../services/token-budget';
 
 // Patterns that indicate a simple query answerable by local LLM (no tools needed)
 const LOCAL_LLM_PATTERNS = [
@@ -33,6 +34,19 @@ const HAIKU_PATTERNS = [
 ];
 const HAIKU_MODEL = 'claude-3-5-haiku-20241022';
 
+// Patterns that demand the strongest model (complex reasoning, self-repair)
+const POWER_PATTERNS = [
+  /תתקן|תקן את|fix|debug|תדבג|תשדרג|upgrade/i,
+  /שגיאה|error|bug|crash|נפל|לא עובד|broken/i,
+  /תנתח את הקוד|analyze code|refactor/i,
+  /תכתוב סקריפט מורכב|complex script/i,
+  /תבנה|build|architect|תתכנן מערכת/i,
+];
+
+// Retry config
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 1500;
+
 interface MessageParam {
   role: 'user' | 'assistant';
   content: string | ContentBlock[];
@@ -56,17 +70,22 @@ export class ClaudeAgent {
   private conversationId: string;
   private usage = { inputTokens: 0, outputTokens: 0, totalCost: 0 };
 
-  // Pricing per million tokens (Sonnet 4)
+  // Pricing per million tokens
   private static PRICING: Record<string, { input: number; output: number }> = {
     'claude-sonnet-4-20250514': { input: 3, output: 15 },
     'claude-3-5-sonnet-20241022': { input: 3, output: 15 },
     'claude-3-5-haiku-20241022': { input: 0.80, output: 4 },
+    'claude-opus-4-20250514': { input: 15, output: 75 },
   };
+
+  // Strongest available model (upgrade to opus when available)
+  private static POWER_MODEL = 'claude-sonnet-4-20250514';
 
   private localLLM: LocalLLM;
   private favorites: FavoritesService;
   private personality: PersonalityEngine;
   private liveMode = false;
+  private failedWithSonnet = false; // escalation flag
 
   constructor(
     apiKey: string,
@@ -124,13 +143,31 @@ export class ClaudeAgent {
   }
 
   private async processCloud(message: string, images?: { base64: string; mediaType: string }[]): Promise<string> {
-    return this._processWithClaude(message, images);
+    return this._processWithClaude(message, images, this.model, true);
   }
 
   private shouldUseHaiku(message: string, images?: { base64: string; mediaType: string }[]): boolean {
     if (images && images.length > 0) return false;
-    if (this.liveMode) return false; // Live mode already uses low max_tokens
+    if (this.liveMode) return false;
+    if (this.failedWithSonnet) return false; // don't downgrade after failure
     return HAIKU_PATTERNS.some(p => p.test(message.trim()));
+  }
+
+  private shouldUsePowerModel(message: string): boolean {
+    if (this.failedWithSonnet) return true; // escalate after failure
+    if (this.toolsUsedThisSession.length > 8) return true; // complex multi-tool session
+    return POWER_PATTERNS.some(p => p.test(message.trim()));
+  }
+
+  // Determine which model tier to use
+  private selectModel(message: string, images?: { base64: string; mediaType: string }[]): { model: string; tier: 'haiku' | 'sonnet' | 'power'; useTools: boolean } {
+    if (this.shouldUseHaiku(message, images)) {
+      return { model: HAIKU_MODEL, tier: 'haiku', useTools: false };
+    }
+    if (this.shouldUsePowerModel(message)) {
+      return { model: ClaudeAgent.POWER_MODEL, tier: 'power', useTools: true };
+    }
+    return { model: this.model, tier: 'sonnet', useTools: true };
   }
 
   async processMessage(
@@ -141,19 +178,22 @@ export class ClaudeAgent {
     if (this.canUseLocalLLM(userMessage, images)) {
       return this.processLocal(userMessage);
     }
-    // Use Haiku for conversational queries (no tools needed, 75% cheaper)
-    const useHaiku = this.shouldUseHaiku(userMessage, images);
-    if (useHaiku) {
-      console.log('[Agent] Routing to Haiku (conversation, no tools)');
-    }
-    return this._processWithClaude(userMessage, images, useHaiku);
+
+    const { model, tier, useTools } = this.selectModel(userMessage, images);
+    const tierNames = { haiku: 'Haiku (cheap)', sonnet: 'Sonnet', power: 'Power' };
+    console.log(`[Agent] Routing to ${tierNames[tier]} (${model})`);
+
+    return this._processWithClaude(userMessage, images, model, useTools);
   }
 
   private async _processWithClaude(
     userMessage: string,
     images?: { base64: string; mediaType: string }[],
-    useHaiku = false,
+    activeModel?: string,
+    useTools = true,
   ): Promise<string> {
+    const model = activeModel || this.model;
+
     // Build user content — text only or multimodal with images
     let userContent: string | ContentBlock[];
     if (images && images.length > 0) {
@@ -179,44 +219,85 @@ export class ClaudeAgent {
       content: userContent,
     });
 
+    // === TOKEN BUDGET: trim history if too large ===
+    const { messages: trimmedHistory, trimmed } = trimHistory(
+      this.conversationHistory as { role: 'user' | 'assistant'; content: string | any[] }[],
+      12000, // max history tokens
+      10,    // keep last 10 messages
+    );
+    if (trimmed) {
+      console.log(`[Agent] History trimmed: ${this.conversationHistory.length} → ${trimmedHistory.length} messages`);
+      this.conversationHistory = trimmedHistory;
+    }
+
+    // === TOKEN BUDGET: build system prompt with priority trimming ===
+    const systemPrompt = this.buildBudgetedSystemPrompt();
+
     let finalText = '';
     let continueLoop = true;
 
     while (continueLoop) {
-      // Use streaming for real-time text delivery
-      const activeModel = useHaiku ? HAIKU_MODEL : this.model;
-      const stream = this.client.messages.stream({
-        model: activeModel,
-        max_tokens: this.liveMode ? 1024 : (useHaiku ? 2048 : 8192),
-        system: buildSystemPrompt({
-          userProfileContext: this.userProfile.toContextString(),
-          memoryContext: this.memory.toContextString(),
-          favoritesContext: this.favorites.toContextString(),
-          personalityContext: this.personality.toContextString(),
-          liveMode: this.liveMode,
-        }),
-        ...(useHaiku ? {} : { tools: getToolDefinitions() as Anthropic.Tool[] }),
-        messages: this.conversationHistory as Anthropic.MessageParam[],
-      });
+      const maxTokens = this.liveMode ? 1024 : (model === HAIKU_MODEL ? 2048 : 8192);
 
-      // Stream text deltas in real-time
-      stream.on('text', (text) => {
-        finalText += text;
-        this.onEvent({
-          type: 'text_delta',
-          payload: { text },
-        });
-      });
+      // === RATE LIMIT: retry with exponential backoff ===
+      let response: Anthropic.Message | undefined;
+      let lastError: Error | null = null;
 
-      // Wait for the full response
-      const response = await stream.finalMessage();
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          if (attempt > 0) {
+            const waitMs = RETRY_BASE_MS * Math.pow(2, attempt - 1);
+            console.log(`[Agent] Rate limited — retry ${attempt}/${MAX_RETRIES} in ${waitMs}ms`);
+            this.onEvent({ type: 'text_delta', payload: { text: `\n⏳ ממתין ${(waitMs / 1000).toFixed(1)} שניות (rate limit)...\n` } });
+            await new Promise(r => setTimeout(r, waitMs));
+          }
+
+          const stream = this.client.messages.stream({
+            model,
+            max_tokens: maxTokens,
+            system: systemPrompt,
+            ...(useTools ? { tools: getToolDefinitions() as Anthropic.Tool[] } : {}),
+            messages: this.conversationHistory as Anthropic.MessageParam[],
+          });
+
+          stream.on('text', (text) => {
+            finalText += text;
+            this.onEvent({ type: 'text_delta', payload: { text } });
+          });
+
+          response = await stream.finalMessage();
+          lastError = null;
+          break; // success
+
+        } catch (err) {
+          lastError = err as Error;
+          const errMsg = (err as any)?.error?.error?.type || (err as Error).message || '';
+
+          if (errMsg.includes('rate_limit') || errMsg.includes('overloaded') || (err as any)?.status === 429 || (err as any)?.status === 529) {
+            if (attempt === MAX_RETRIES) {
+              // Final fallback: try Haiku (different rate limit bucket)
+              if (model !== HAIKU_MODEL) {
+                console.log('[Agent] All retries failed — falling back to Haiku');
+                this.onEvent({ type: 'text_delta', payload: { text: '\n🔄 מעבר למודל מהיר...\n' } });
+                this.conversationHistory.pop(); // remove the user message we added
+                return this._processWithClaude(userMessage, images, HAIKU_MODEL, false);
+              }
+            }
+            continue; // retry
+          }
+          // Non-rate-limit error — don't retry
+          throw err;
+        }
+      }
+
+      if (lastError) throw lastError;
 
       // Track usage
-      const inTok = response.usage?.input_tokens || 0;
-      const outTok = response.usage?.output_tokens || 0;
+      const inTok = response!.usage?.input_tokens || 0;
+      const outTok = response!.usage?.output_tokens || 0;
       this.usage.inputTokens += inTok;
       this.usage.outputTokens += outTok;
-      const pricing = ClaudeAgent.PRICING[activeModel] || { input: 3, output: 15 };
+      const pricing = ClaudeAgent.PRICING[model] || { input: 3, output: 15 };
       const msgCost = (inTok * pricing.input + outTok * pricing.output) / 1_000_000;
       this.usage.totalCost += msgCost;
 
@@ -237,7 +318,7 @@ export class ClaudeAgent {
       const toolResults: ContentBlock[] = [];
       continueLoop = false;
 
-      for (const block of response.content) {
+      for (const block of response!.content) {
         if (block.type === 'text') {
           assistantContent.push({ type: 'text', text: block.text });
           // text_delta already emitted via stream
@@ -312,7 +393,7 @@ export class ClaudeAgent {
       }
 
       // Stop if Claude says stop
-      if (response.stop_reason === 'end_turn' && !continueLoop) {
+      if (response!.stop_reason === 'end_turn' && !continueLoop) {
         continueLoop = false;
       }
     }
@@ -374,6 +455,46 @@ export class ClaudeAgent {
           resolve(false);
         }
       }, 60000);
+    });
+  }
+
+  // === BUDGETED SYSTEM PROMPT: trim context by priority when prompt is too large ===
+  private buildBudgetedSystemPrompt(): string {
+    const MAX_CONTEXT_TOKENS = 3000;
+
+    const sections = [
+      { key: 'time', content: '', priority: 10 },  // time is injected by buildSystemPrompt
+      { key: 'personality', content: this.personality.toContextString(), priority: 8 },
+      { key: 'memory', content: this.memory.toContextString(), priority: 7 },
+      { key: 'userProfile', content: this.userProfile.toContextString(), priority: 5 },
+      { key: 'favorites', content: this.favorites.toContextString(), priority: 4 },
+    ];
+
+    const totalEstimate = sections.reduce((s, sec) => s + estimateTokens(sec.content), 0);
+
+    if (totalEstimate > MAX_CONTEXT_TOKENS) {
+      const { kept, dropped } = trimSystemContext(sections, MAX_CONTEXT_TOKENS);
+      if (dropped.length > 0) {
+        console.log(`[Agent] Prompt trimmed — dropped: ${dropped.join(', ')}`);
+      }
+      const contextMap: Record<string, string> = {};
+      for (const s of kept) contextMap[s.key] = s.content;
+      return buildSystemPrompt({
+        userProfileContext: contextMap['userProfile'] || '',
+        memoryContext: contextMap['memory'] || '',
+        favoritesContext: contextMap['favorites'] || '',
+        personalityContext: contextMap['personality'] || '',
+        liveMode: this.liveMode,
+      });
+    }
+
+    // No trimming needed
+    return buildSystemPrompt({
+      userProfileContext: this.userProfile.toContextString(),
+      memoryContext: this.memory.toContextString(),
+      favoritesContext: this.favorites.toContextString(),
+      personalityContext: this.personality.toContextString(),
+      liveMode: this.liveMode,
     });
   }
 

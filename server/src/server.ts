@@ -25,6 +25,7 @@ import { BackupService } from './services/backup';
 import { VoiceDaemon } from './services/voice-daemon';
 import { FavoritesService } from './services/favorites';
 import { PersonalityEngine } from './services/personality-engine';
+import { RemoteBackend } from './services/remote-backend';
 
 dotenv.config();
 
@@ -53,6 +54,7 @@ const backupService = new BackupService();
 const voiceDaemon = new VoiceDaemon();
 const favoritesService = new FavoritesService();
 const personalityEngine = new PersonalityEngine(process.env.ANTHROPIC_API_KEY);
+const remoteBackend = new RemoteBackend();
 
 const localLLM = new LocalLLM();
 
@@ -550,6 +552,31 @@ app.get('/api/personality/episodes', authMiddleware, (req, res) => {
 
 app.get('/api/personality/time-patterns', authMiddleware, (_req, res) => {
   res.json(personalityEngine.getTimePatterns());
+});
+
+// ===== REMOTE BACKEND API =====
+
+app.get('/api/remote-backend/status', authMiddleware, (_req, res) => {
+  res.json(remoteBackend.getStatus());
+});
+
+app.get('/api/remote-backend/config', authMiddleware, (_req, res) => {
+  res.json(remoteBackend.getConfig());
+});
+
+app.post('/api/remote-backend/config', authMiddleware, (req, res) => {
+  remoteBackend.saveConfig(req.body);
+  res.json({ success: true, config: remoteBackend.getConfig() });
+});
+
+app.post('/api/remote-backend/connect', authMiddleware, async (_req, res) => {
+  const success = await remoteBackend.connect();
+  res.json({ success, status: remoteBackend.getStatus() });
+});
+
+app.post('/api/remote-backend/disconnect', authMiddleware, (_req, res) => {
+  remoteBackend.disconnect();
+  res.json({ success: true, status: remoteBackend.getStatus() });
 });
 
 // ===== CONVERSATION HISTORY API =====
