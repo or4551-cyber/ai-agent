@@ -556,7 +556,7 @@ export default function LiveMode() {
 
   const startVAD = useCallback(async () => {
     try {
-      const vadModule = await import('@ricky0123/vad-web');
+      const vadModule = await import(/* webpackIgnore: true */ '@ricky0123/vad-web');
       const vad = await vadModule.MicVAD.new({
         onSpeechStart: () => {
           if (!activeRef.current) return;
