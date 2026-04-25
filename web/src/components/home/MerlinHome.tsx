@@ -47,8 +47,6 @@ function Clock() {
 
 // ===== HEALTH CARD =====
 function HealthCard({ health, proximity }: { health: HealthStatus | null; proximity: ProximityStatus | null }) {
-  if (!health && !proximity) return null;
-
   const stressColors = { low: 'text-green-400', medium: 'text-yellow-400', high: 'text-red-400', unknown: 'text-zinc-500' };
   const stressLabels = { low: 'נמוך', medium: 'בינוני', high: 'גבוה', unknown: '—' };
 

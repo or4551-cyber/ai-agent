@@ -51,6 +51,7 @@ export default function ChatWindow() {
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const [isOnline, setIsOnline] = useState(true);
   const [queueSize, setQueueSize] = useState(0);
+  const [autoVoice, setAutoVoice] = useState(false);
   const wsRef = useRef<AgentWebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentAssistantId = useRef<string>('');
@@ -272,7 +273,14 @@ export default function ChatWindow() {
     const cmd = params.get('cmd');
     if (cmd) {
       window.history.replaceState({}, '', window.location.pathname);
-      setTimeout(() => handleSend(decodeURIComponent(cmd)), 300);
+      setTimeout(() => handleSend(cmd), 300);
+      return;
+    }
+    // Check ?voice=1 parameter — auto-start voice input
+    const voice = params.get('voice');
+    if (voice === '1') {
+      window.history.replaceState({}, '', window.location.pathname);
+      setAutoVoice(true);
     }
   }, [connected]);
 
@@ -382,10 +390,10 @@ export default function ChatWindow() {
       <div className="glass flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-[var(--primary)] to-purple-600 flex items-center justify-center text-white text-sm font-bold shadow-lg shadow-[var(--primary)]/20">
-            AI
+            M
           </div>
           <div>
-            <h1 className="text-sm font-bold tracking-tight">AI Agent</h1>
+            <h1 className="text-sm font-bold tracking-tight">Merlin</h1>
             <div className="flex items-center gap-1.5 text-[11px]">
               {connectionStatus === 'connected' && (
                 <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse-soft" /> <span className="text-emerald-400">מחובר</span></>
@@ -642,6 +650,8 @@ export default function ChatWindow() {
         isStreaming={isStreaming}
         alerts={alerts}
         hasMessages={messages.length > 0}
+        autoVoice={autoVoice}
+        onAutoVoiceConsumed={() => setAutoVoice(false)}
       />
     </div>
   );

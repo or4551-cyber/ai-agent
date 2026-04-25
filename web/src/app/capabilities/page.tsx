@@ -228,7 +228,7 @@ export default function CapabilitiesPage() {
     if (typeof window !== 'undefined') {
       sessionStorage.setItem('pending_command', text);
     }
-    router.push('/');
+    router.push('/chat');
   };
 
   const copyText = (text: string) => {

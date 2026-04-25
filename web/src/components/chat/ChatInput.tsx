@@ -17,6 +17,8 @@ interface ChatInputProps {
   isStreaming?: boolean;
   alerts?: ProactiveAlert[];
   hasMessages?: boolean;
+  autoVoice?: boolean;
+  onAutoVoiceConsumed?: () => void;
 }
 
 function getContextChips(alerts?: ProactiveAlert[]): { label: string; msg: string }[] {
@@ -52,7 +54,7 @@ function getContextChips(alerts?: ProactiveAlert[]): { label: string; msg: strin
   ];
 }
 
-export default function ChatInput({ onSend, onAbort, disabled, isStreaming, alerts, hasMessages }: ChatInputProps) {
+export default function ChatInput({ onSend, onAbort, disabled, isStreaming, alerts, hasMessages, autoVoice, onAutoVoiceConsumed }: ChatInputProps) {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [isListening, setIsListening] = useState(false);
@@ -102,6 +104,14 @@ export default function ChatInput({ onSend, onAbort, disabled, isStreaming, aler
       textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 150) + 'px';
     }
   }, [input]);
+
+  // Auto-start voice when navigated with ?voice=1
+  useEffect(() => {
+    if (autoVoice && hasSpeechAPI && !isListening && !disabled) {
+      toggleVoice();
+      onAutoVoiceConsumed?.();
+    }
+  }, [autoVoice]);
 
   const handleSend = () => {
     const trimmed = input.trim();
