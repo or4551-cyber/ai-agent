@@ -11,7 +11,7 @@ const LAST_DIGEST_FILE = path.join(DATA_DIR, 'last-digest.txt');
 
 const SNAPSHOT_INTERVAL = 5 * 60 * 1000;  // 5 minutes
 const DIGEST_HOUR = 21; // 9 PM — daily digest
-const MAX_SNAPSHOTS = 288; // 24 hours of 5-min intervals
+const MAX_SNAPSHOTS = 576; // 48 hours of 5-min intervals (more data = better insights)
 
 export class ObserverService {
   private snapshotTimer: NodeJS.Timeout | null = null;
@@ -20,6 +20,8 @@ export class ObserverService {
   private suggestions: Suggestion[] = [];
   private apiKey: string;
   private running = false;
+  private totalCollected = 0;
+  private consecutiveErrors = 0;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -97,16 +99,31 @@ export class ObserverService {
     try {
       const snapshot = takeSnapshot();
       this.snapshots.push(snapshot);
+      this.totalCollected++;
+      this.consecutiveErrors = 0;
 
-      // Keep only last 24h
+      // Rolling window — keep last 48h
       if (this.snapshots.length > MAX_SNAPSHOTS) {
         this.snapshots = this.snapshots.slice(-MAX_SNAPSHOTS);
       }
 
       this.saveSnapshots();
-      console.log(`[Observer] Snapshot taken (${this.snapshots.length} total)`);
+
+      // Log every 12th snapshot (~1 hour) to avoid spam
+      if (this.totalCollected % 12 === 0 || this.totalCollected <= 3) {
+        console.log(`[Observer] Snapshot #${this.totalCollected} (buffer: ${this.snapshots.length}/${MAX_SNAPSHOTS})`);
+      }
     } catch (err) {
-      console.error('[Observer] Snapshot error:', (err as Error).message);
+      this.consecutiveErrors++;
+      console.error(`[Observer] Snapshot error (${this.consecutiveErrors}x): ${(err as Error).message}`);
+
+      // Self-heal: if we fail 5 times in a row, restart the timer
+      if (this.consecutiveErrors >= 5) {
+        console.log('[Observer] Too many errors, restarting collection...');
+        this.consecutiveErrors = 0;
+        if (this.snapshotTimer) clearInterval(this.snapshotTimer);
+        this.snapshotTimer = setInterval(() => this.collectSnapshot(), SNAPSHOT_INTERVAL);
+      }
     }
   }
 
@@ -173,11 +190,17 @@ export class ObserverService {
   }
 
   getStatus(): Record<string, unknown> {
+    const lastTs = this.snapshots.length > 0 ? this.snapshots[this.snapshots.length - 1].timestamp : null;
+    const lastAge = lastTs ? Math.round((Date.now() - new Date(lastTs).getTime()) / 60000) : null;
     return {
       running: this.running,
       snapshotCount: this.snapshots.length,
+      totalCollected: this.totalCollected,
+      bufferMax: MAX_SNAPSHOTS,
       suggestionsCount: this.suggestions.length,
-      lastSnapshot: this.snapshots.length > 0 ? this.snapshots[this.snapshots.length - 1].timestamp : null,
+      lastSnapshot: lastTs,
+      lastSnapshotAge: lastAge !== null ? `${lastAge} דקות` : null,
+      consecutiveErrors: this.consecutiveErrors,
       interval: '5 min',
       digestHour: `${DIGEST_HOUR}:00`,
     };
