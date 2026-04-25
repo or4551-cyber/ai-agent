@@ -114,6 +114,14 @@ const HEALING_RULES: HealingRule[] = [
     ],
     description: 'npm corruption',
   },
+  {
+    pattern: /screenshot|PROJECTION_MEDIA|screen capture/i,
+    fixes: [
+      async () => { await runCommand('pkg install termux-api -y 2>/dev/null', undefined, 30000); return 'Installed termux-api for screenshot'; },
+      async () => { await runCommand('appops set com.termux PROJECT_MEDIA allow 2>/dev/null', undefined, 5000); return 'Granted media projection permission'; },
+    ],
+    description: 'Screenshot permission missing',
+  },
 ];
 
 export async function executeTool(

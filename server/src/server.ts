@@ -412,8 +412,17 @@ app.post('/api/alerts/read-all', authMiddleware, (_req, res) => {
 // ===== HEALTH & PROXIMITY API =====
 
 app.get('/api/health', authMiddleware, (_req, res) => {
-  const health = proactiveAgent.getHealthMonitor().getHealthStatus();
+  const monitor = proactiveAgent.getHealthMonitor();
+  // Force a fresh reading so the UI always gets latest data
+  try { monitor.forceCollect(); } catch {}
+  const health = monitor.getHealthStatus();
   res.json(health);
+});
+
+app.post('/api/health/push', authMiddleware, (req, res) => {
+  const { heartRate, steps, isMoving } = req.body;
+  proactiveAgent.getHealthMonitor().pushReading({ heartRate, steps, isMoving });
+  res.json({ success: true });
 });
 
 app.get('/api/health/sensors', authMiddleware, (_req, res) => {

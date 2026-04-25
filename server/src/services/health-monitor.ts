@@ -116,16 +116,24 @@ export class HealthMonitor {
         const pkg = (n.packageName || '') as string;
         const title = (n.title || '') as string;
         const content = (n.content || '') as string;
-        const text = `${title} ${content}`;
+        const subText = (n.subText || '') as string;
+        const bigText = (n.bigText || '') as string;
+        const text = `${title} ${content} ${subText} ${bigText}`;
 
-        // Samsung Health notifications — match broader package names
-        if (pkg.includes('shealth') || pkg.includes('samsung.health') || pkg.includes('sec.android.app.shealth') || pkg.includes('health')) {
-          console.log(`[HealthMonitor] Samsung Health notification: pkg=${pkg} text="${text.substring(0, 80)}"`);
+        // Samsung Health / Galaxy Watch / Wear OS / Google Fit / Health Connect
+        const isHealthPkg = pkg.includes('shealth') || pkg.includes('samsung.health') ||
+          pkg.includes('sec.android.app.shealth') || pkg.includes('health') ||
+          pkg.includes('wear') || pkg.includes('galaxy.wearable') ||
+          pkg.includes('google.android.apps.fitness') || pkg.includes('healthconnect');
 
-          // Steps: any number followed by steps-related words, OR within the text
-          const stepsMatch = text.match(/(\d[\d,\.]+)\s*(?:צעדים|steps|צעד|걸음)/i)
-            || text.match(/(?:צעדים|steps)[:\s]*(\d[\d,\.]+)/i)
-            || text.match(/(\d{3,6})\s*\//);  // "3456 / 6000" style
+        if (isHealthPkg) {
+          console.log(`[HealthMonitor] Health notification: pkg=${pkg} text="${text.substring(0, 120)}"`);
+
+          // Steps: broad matching — any standalone number 100-199999 near step-related words
+          const stepsMatch = text.match(/(\d[\d,\.]+)\s*(?:צעדים|steps|צעד|걸음|adım|schritt)/i)
+            || text.match(/(?:צעדים|steps|걸음)[:\s]*(\d[\d,\.]+)/i)
+            || text.match(/(\d{3,6})\s*\/\s*\d/)  // "3456 / 6000" style
+            || text.match(/(\d{3,6})\s*(?:צע|step)/i);  // "3456 צע" partial
           if (stepsMatch) {
             const num = parseInt(stepsMatch[1].replace(/[,\.]/g, ''));
             if (num > 0 && num < 200000) {
@@ -134,10 +142,11 @@ export class HealthMonitor {
             }
           }
 
-          // Heart rate: various formats
-          const hrMatch = text.match(/(\d{2,3})\s*(?:bpm|פעימות|דופק|BPM)/i)
-            || text.match(/(?:דופק|heart|bpm|HR)[:\s]*(\d{2,3})/i)
-            || text.match(/(\d{2,3})\s*(?:beats|heartbeat)/i);
+          // Heart rate: broad matching
+          const hrMatch = text.match(/(\d{2,3})\s*(?:bpm|פעימות|דופק|BPM|심박)/i)
+            || text.match(/(?:דופק|heart|bpm|HR|pulse|심박|心拍)[:\s]*(\d{2,3})/i)
+            || text.match(/(\d{2,3})\s*(?:beats|heartbeat|beat)/i)
+            || text.match(/♥\s*(\d{2,3})/);  // ♥ 72 style
           if (hrMatch) {
             const num = parseInt(hrMatch[1]);
             if (num > 30 && num < 220) {
@@ -351,6 +360,29 @@ export class HealthMonitor {
     console.log(`[HealthMonitor] ${parts.join(', ')}`);
   }
 
+  // ===== EXTERNAL DATA INJECTION =====
+  pushReading(data: { heartRate?: number | null; steps?: number | null; isMoving?: boolean }): void {
+    const reading: HealthReading = {
+      timestamp: new Date().toISOString(),
+      heartRate: data.heartRate ?? null,
+      steps: data.steps ?? null,
+      accelerometer: null,
+      isMoving: data.isMoving ?? false,
+      stressIndicator: this.estimateStress(data.heartRate ?? null),
+    };
+    this.readings.push(reading);
+    this.readings = this.readings.slice(-MAX_RECORDS);
+    this.saveReadings();
+    console.log(`[HealthMonitor] Pushed external reading: HR=${data.heartRate}, Steps=${data.steps}`);
+  }
+
+  // Force a fresh data collection (called on API request)
+  forceCollect(): void {
+    // Clear notification cache so we get truly fresh data
+    this.samsungHealthCache.ts = 0;
+    this.collect();
+  }
+
   // ===== STATUS =====
   getHealthStatus(): HealthStatus {
     const recent = this.readings.slice(-12); // Last hour
@@ -361,7 +393,7 @@ export class HealthMonitor {
     const avgHr = hrReadings.length > 0 ? Math.round(hrReadings.reduce((a, b) => a + b, 0) / hrReadings.length) : null;
 
     // Is heart rate abnormal? (> 100 resting or sudden spike > 30% over average)
-    const currentHr = latest?.heartRate || null;
+    const currentHr = latest?.heartRate ?? null;
     let isAbnormal = false;
     if (currentHr !== null && avgHr !== null) {
       isAbnormal = currentHr > 100 || currentHr > avgHr * 1.3;
@@ -387,7 +419,7 @@ export class HealthMonitor {
       currentHeartRate: currentHr,
       avgHeartRate: avgHr,
       isHeartRateAbnormal: isAbnormal,
-      todaySteps: latest?.steps || null,
+      todaySteps: latest?.steps ?? null,
       isMoving: latest?.isMoving || false,
       sedentaryMinutes,
       stressLevel,

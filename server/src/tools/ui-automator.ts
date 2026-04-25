@@ -146,17 +146,36 @@ export async function uiListApps(): Promise<string> {
 // ===== SCREENSHOT =====
 
 export async function uiScreenshot(): Promise<string> {
-  try {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    await runCommand(`termux-screenshot -f ${SCREENSHOT_PATH} 2>/dev/null`, undefined, 10000);
-    if (fs.existsSync(SCREENSHOT_PATH)) {
-      const base64 = fs.readFileSync(SCREENSHOT_PATH).toString('base64');
-      return `screenshot:${base64}`;
+  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  // Try multiple screenshot methods in order of reliability
+  const methods = [
+    { name: 'screencap', cmd: `screencap -p ${SCREENSHOT_PATH} 2>/dev/null` },
+    { name: 'termux-screenshot', cmd: `termux-screenshot -f ${SCREENSHOT_PATH} 2>/dev/null` },
+    { name: 'su-screencap', cmd: `su -c "screencap -p ${SCREENSHOT_PATH}" 2>/dev/null` },
+  ];
+
+  for (const method of methods) {
+    try {
+      // Remove old screenshot first
+      try { fs.unlinkSync(SCREENSHOT_PATH); } catch {}
+      await runCommand(method.cmd, undefined, 10000);
+      if (fs.existsSync(SCREENSHOT_PATH)) {
+        const stat = fs.statSync(SCREENSHOT_PATH);
+        if (stat.size > 1000) { // Valid PNG is at least 1KB
+          const base64 = fs.readFileSync(SCREENSHOT_PATH).toString('base64');
+          console.log(`[Screenshot] Success via ${method.name} (${Math.round(stat.size / 1024)}KB)`);
+          return `screenshot:${base64}`;
+        }
+      }
+    } catch {
+      // Try next method
     }
-    return 'לא הצלחתי לצלם מסך';
-  } catch {
-    return 'לא הצלחתי לצלם מסך — בדוק הרשאות termux-screenshot';
   }
+
+  return 'לא הצלחתי לצלם מסך — נדרשת הרשאת PROJECTION_MEDIA או root.\n' +
+    'טיפ: הפעל את Termux:API ותן הרשאת צילום מסך, או התקן עם:\n' +
+    'pkg install termux-api && termux-setup-storage';
 }
 
 // ===== APP RECIPES =====
