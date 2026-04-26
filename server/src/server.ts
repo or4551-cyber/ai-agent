@@ -480,6 +480,87 @@ app.post('/api/device-sync/set-name', authMiddleware, (req, res) => {
   res.json({ success: true, identity: deviceSync.getIdentity() });
 });
 
+// ===== REMOTE DEVICE CONTROL =====
+
+// Quick status endpoint for remote queries (lightweight, no auth for peer access)
+app.get('/api/device-sync/quick-status', (_req, res) => {
+  const { execSync } = require('child_process');
+  const status: Record<string, unknown> = { timestamp: Date.now() };
+
+  // Battery
+  try {
+    const bat = JSON.parse(execSync('termux-battery-status 2>/dev/null', { timeout: 5000 }).toString());
+    status.battery = { percentage: bat.percentage, status: bat.status, temperature: bat.temperature };
+  } catch { status.battery = null; }
+
+  // Health
+  try {
+    const monitor = proactiveAgent.getHealthMonitor();
+    status.health = monitor.getHealthStatus();
+  } catch { status.health = null; }
+
+  // Notifications count
+  try {
+    const notifs = JSON.parse(execSync('termux-notification-list 2>/dev/null', { timeout: 5000 }).toString());
+    status.notifications = { count: Array.isArray(notifs) ? notifs.length : 0 };
+  } catch { status.notifications = null; }
+
+  // Device identity
+  if (deviceSync) {
+    status.device = deviceSync.getIdentity();
+  }
+
+  res.json(status);
+});
+
+// Proxy: forward an API call to a peer device and return the result
+app.post('/api/device-sync/proxy', authMiddleware, async (req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
+  const { peerId, path: apiPath, method = 'GET', body } = req.body;
+  if (!peerId || !apiPath) { res.status(400).json({ error: 'peerId and path required' }); return; }
+
+  const peer = deviceSync.getPeers().find(p => p.id === peerId);
+  if (!peer?.online || !peer.ip) { res.status(404).json({ error: 'Peer not online' }); return; }
+
+  const url = `http://${peer.ip}:${peer.port}${apiPath}`;
+
+  try {
+    const http = require('http');
+    const result = await new Promise<string>((resolve, reject) => {
+      const options: any = {
+        hostname: peer.ip,
+        port: peer.port,
+        path: apiPath,
+        method: method.toUpperCase(),
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json', 'X-Merlin-Device-Id': deviceSync!.getIdentity().id },
+      };
+
+      const proxyReq = http.request(options, (proxyRes: any) => {
+        let data = '';
+        proxyRes.on('data', (chunk: string) => data += chunk);
+        proxyRes.on('end', () => resolve(data));
+      });
+
+      proxyReq.on('error', reject);
+      proxyReq.on('timeout', () => { proxyReq.destroy(); reject(new Error('timeout')); });
+
+      if (body && method.toUpperCase() !== 'GET') {
+        proxyReq.write(JSON.stringify(body));
+      }
+      proxyReq.end();
+    });
+
+    try {
+      res.json(JSON.parse(result));
+    } catch {
+      res.json({ raw: result });
+    }
+  } catch (err: any) {
+    res.status(502).json({ error: `Proxy failed: ${err.message}` });
+  }
+});
+
 // ===== OBSERVER API =====
 
 app.get('/api/observer/status', authMiddleware, (_req, res) => {

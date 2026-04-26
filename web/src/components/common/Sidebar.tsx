@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import {
   MessageCircle, FolderOpen, Image, Settings, Bot, LayoutDashboard,
   HardDrive, Home, Mic, Smartphone, Tablet, Monitor, Wifi, WifiOff,
-  Sparkles, ChevronLeft, ChevronRight as ChevronRightIcon,
+  Sparkles, ChevronLeft, ChevronRight as ChevronRightIcon, Zap,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: '/chat', icon: MessageCircle, label: 'צ\'אט' },
   { href: '/live', icon: Mic, label: 'Live' },
   { href: '/dashboard', icon: LayoutDashboard, label: 'דשבורד' },
+  { href: '/mission-control', icon: Zap, label: 'מרכז בקרה' },
   { href: '/files', icon: FolderOpen, label: 'קבצים' },
   { href: '/gallery', icon: Image, label: 'גלריה' },
   { href: '/storage', icon: HardDrive, label: 'אחסון' },

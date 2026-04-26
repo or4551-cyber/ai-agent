@@ -427,6 +427,28 @@ export async function sendToDevice(peerId: string, type: string, payload: Record
   });
 }
 
+export interface RemoteQuickStatus {
+  timestamp: number;
+  battery: { percentage: number; status: string; temperature: number } | null;
+  health: HealthStatus | null;
+  notifications: { count: number } | null;
+  device: { id: string; name: string; type: string; model: string };
+}
+
+export async function getRemoteQuickStatus(peerId: string): Promise<RemoteQuickStatus> {
+  return apiFetch('/api/device-sync/proxy', {
+    method: 'POST',
+    body: JSON.stringify({ peerId, path: '/api/device-sync/quick-status', method: 'GET' }),
+  });
+}
+
+export async function proxyToDevice(peerId: string, apiPath: string, method = 'GET', body?: unknown): Promise<unknown> {
+  return apiFetch('/api/device-sync/proxy', {
+    method: 'POST',
+    body: JSON.stringify({ peerId, path: apiPath, method, body }),
+  });
+}
+
 // ===== CONVERSATION EXPORT =====
 
 export function getExportUrl(id: string): string {
