@@ -280,13 +280,52 @@ export class PluginManager {
     if (!plugin) return `❌ פלגין "${name}" לא נמצא.`;
     if (!plugin.enabled) return `⏸️ פלגין "${name}" מושבת.`;
 
+    const PLUGIN_TIMEOUT = 30000;
+    const MAX_OUTPUT = 64 * 1024; // 64KB max output
+
     try {
       const inputJson = JSON.stringify(input);
-      const result = execSync(
-        `bash "${plugin.handlerPath}" '${inputJson.replace(/'/g, "'\\''")}'`,
-        { timeout: 30000, encoding: 'utf-8' }
-      );
-      return result.trim() || '(no output)';
+      // Use spawn for non-blocking execution
+      return await new Promise<string>((resolve) => {
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          resolve(`⏱️ פלגין "${name}" חרג מ-${PLUGIN_TIMEOUT / 1000} שניות — הופסק.`);
+        }, PLUGIN_TIMEOUT);
+
+        const child = spawn('bash', [plugin.handlerPath, inputJson], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: PLUGIN_TIMEOUT,
+        });
+
+        let stdout = '';
+        let stderr = '';
+        let outputSize = 0;
+
+        child.stdout?.on('data', (d: Buffer) => {
+          outputSize += d.length;
+          if (outputSize <= MAX_OUTPUT) stdout += d.toString();
+        });
+        child.stderr?.on('data', (d: Buffer) => {
+          outputSize += d.length;
+          if (outputSize <= MAX_OUTPUT) stderr += d.toString();
+        });
+
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          if (outputSize > MAX_OUTPUT) {
+            resolve(stdout.slice(0, MAX_OUTPUT) + `\n\n⚠️ פלט נחתך (${Math.round(outputSize / 1024)}KB > ${MAX_OUTPUT / 1024}KB)`);
+          } else if (code === 0) {
+            resolve(stdout.trim() || '(no output)');
+          } else {
+            resolve(`❌ פלגין "${name}" יצא עם קוד ${code}:\n${stderr.slice(-500) || stdout.slice(-500)}`);
+          }
+        });
+
+        child.on('error', (err) => {
+          clearTimeout(timer);
+          resolve(`❌ שגיאת פלגין "${name}": ${err.message}`);
+        });
+      });
     } catch (err) {
       const error = err as { stderr?: string; message: string };
       return `❌ שגיאת פלגין "${name}": ${error.stderr || error.message}`;

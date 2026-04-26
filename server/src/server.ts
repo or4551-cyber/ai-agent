@@ -29,6 +29,10 @@ import {
   conversationHistoryService as conversationHistory,
   smartAlertsService as smartAlerts,
 } from './services/registry';
+import {
+  startCrashShield, getShieldHealth, registerAgent, unregisterAgent,
+  touchAgent, onOOMPressure, safeExec,
+} from './services/crash-shield';
 
 dotenv.config();
 
@@ -41,6 +45,21 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason) => {
   console.error('[FATAL] Unhandled rejection (server kept alive):', reason);
+});
+
+// Start CrashShield protection layer
+startCrashShield();
+
+// OOM emergency: clear idle agents to free memory
+onOOMPressure(() => {
+  let cleared = 0;
+  for (const [id, agent] of agents) {
+    try { agent.cleanup(); } catch {}
+    agents.delete(id);
+    unregisterAgent(id);
+    cleared++;
+  }
+  if (cleared > 0) console.warn(`[OOM] Cleared ${cleared} agents to free memory`);
 });
 
 // Start background services (singletons live in services/registry.ts)
@@ -484,13 +503,15 @@ app.post('/api/device-sync/set-name', authMiddleware, (req, res) => {
 
 // Quick status endpoint for remote queries (lightweight, no auth for peer access)
 app.get('/api/device-sync/quick-status', (_req, res) => {
-  const { execSync } = require('child_process');
   const status: Record<string, unknown> = { timestamp: Date.now() };
 
-  // Battery
+  // Battery (using safeExec — won't crash)
   try {
-    const bat = JSON.parse(execSync('termux-battery-status 2>/dev/null', { timeout: 5000 }).toString());
-    status.battery = { percentage: bat.percentage, status: bat.status, temperature: bat.temperature };
+    const batRaw = safeExec('termux-battery-status 2>/dev/null', { timeout: 5000, label: 'quick-battery' });
+    if (batRaw) {
+      const bat = JSON.parse(batRaw);
+      status.battery = { percentage: bat.percentage, status: bat.status, temperature: bat.temperature };
+    } else { status.battery = null; }
   } catch { status.battery = null; }
 
   // Health
@@ -499,10 +520,13 @@ app.get('/api/device-sync/quick-status', (_req, res) => {
     status.health = monitor.getHealthStatus();
   } catch { status.health = null; }
 
-  // Notifications count
+  // Notifications count (using safeExec — won't crash)
   try {
-    const notifs = JSON.parse(execSync('termux-notification-list 2>/dev/null', { timeout: 5000 }).toString());
-    status.notifications = { count: Array.isArray(notifs) ? notifs.length : 0 };
+    const notifsRaw = safeExec('termux-notification-list 2>/dev/null', { timeout: 5000, label: 'quick-notifs' });
+    if (notifsRaw) {
+      const notifs = JSON.parse(notifsRaw);
+      status.notifications = { count: Array.isArray(notifs) ? notifs.length : 0 };
+    } else { status.notifications = null; }
   } catch { status.notifications = null; }
 
   // Device identity
@@ -511,6 +535,11 @@ app.get('/api/device-sync/quick-status', (_req, res) => {
   }
 
   res.json(status);
+});
+
+// Shield health endpoint — self-monitoring
+app.get('/api/shield-health', authMiddleware, (_req, res) => {
+  res.json(getShieldHealth());
 });
 
 // Proxy: forward an API call to a peer device and return the result
@@ -1630,8 +1659,10 @@ wss.on('connection', (ws: WebSocket, req) => {
   }, selectedModel);
 
   agents.set(connectionId, agent);
+  registerAgent(connectionId);
 
   ws.on('message', async (data: Buffer) => {
+    touchAgent(connectionId);
     try {
       const msg = JSON.parse(data.toString());
 
@@ -1744,6 +1775,7 @@ wss.on('connection', (ws: WebSocket, req) => {
       try { agentToCleanup.cleanup(); } catch {}
     }
     agents.delete(connectionId);
+    unregisterAgent(connectionId);
   });
 
   ws.on('error', (err) => {

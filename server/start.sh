@@ -61,7 +61,9 @@ while true; do
   echo ""
 
   # Start server in background so we can monitor it
-  node dist/server.js &
+  # --expose-gc: allows CrashShield to trigger manual GC
+  # --max-old-space-size: cap heap to prevent Android OOM kill
+  node --expose-gc --max-old-space-size=512 dist/server.js &
   SERVER_PID=$!
 
   # Wait for server process to exit
