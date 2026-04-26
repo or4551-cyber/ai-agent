@@ -64,8 +64,13 @@ const localLLM = new LocalLLM();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3002;
-const deviceSync = new DeviceSyncService(PORT);
-deviceSync.start();
+let deviceSync: DeviceSyncService | null = null;
+try {
+  deviceSync = new DeviceSyncService(PORT);
+  deviceSync.start();
+} catch (err) {
+  console.error('[DeviceSync] Failed to start (server continues):', (err as Error).message);
+}
 const AUTH_TOKEN = process.env.AUTH_TOKEN || 'dev-token';
 const FRONTEND_DIR = path.join(__dirname, '..', '..', 'web', 'out');
 
@@ -384,30 +389,36 @@ app.delete('/api/routines/:id', authMiddleware, (req, res) => {
 // (they run on the local network only)
 
 app.get('/api/device-sync/identity', (_req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   res.json(deviceSync.getIdentity());
 });
 
 app.get('/api/device-sync/manifest', (_req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   res.json(deviceSync.getManifest());
 });
 
 app.get('/api/device-sync/file/:name', (req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   const content = deviceSync.getFileContent(req.params.name);
   if (!content) { res.status(404).json({ error: 'File not found' }); return; }
   res.type('application/json').send(content);
 });
 
 app.post('/api/device-sync/message', express.json(), (req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   deviceSync.handleIncomingMessage(req.body);
   res.json({ ok: true });
 });
 
 // Auth-protected sync management endpoints
 app.get('/api/device-sync/status', authMiddleware, (_req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   res.json(deviceSync.getStatus());
 });
 
 app.post('/api/device-sync/add-peer', authMiddleware, async (req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   const { ip, port } = req.body;
   if (!ip) { res.status(400).json({ error: 'ip required' }); return; }
   const peer = await deviceSync.addPeer(ip, port || 3002);
@@ -419,17 +430,20 @@ app.post('/api/device-sync/add-peer', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/device-sync/remove-peer', authMiddleware, (req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   const { id } = req.body;
   res.json({ success: deviceSync.removePeer(id) });
 });
 
 app.post('/api/device-sync/send', authMiddleware, async (req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   const { peerId, type, payload } = req.body;
   const ok = await deviceSync.sendToPeer(peerId, type || 'notification', payload || {});
   res.json({ success: ok });
 });
 
 app.post('/api/device-sync/set-name', authMiddleware, (req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
   const { name } = req.body;
   if (!name) { res.status(400).json({ error: 'name required' }); return; }
   deviceSync.setDeviceName(name);
