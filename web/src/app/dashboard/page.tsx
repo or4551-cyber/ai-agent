@@ -165,7 +165,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Status Cards */}
-      <div className="grid grid-cols-2 gap-2 px-4 pb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 lg:gap-3 px-4 lg:px-6 pb-4">
         {/* Battery */}
         {battery && (
           <div className="p-3 rounded-2xl bg-[var(--card)] border border-[var(--border)]">
@@ -212,8 +212,11 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Reminders + AI — side by side on tablet */}
+      <div className="lg:grid lg:grid-cols-2 lg:gap-4 lg:px-6">
+
       {/* Reminders */}
-      <div className="px-4 pb-4">
+      <div className="px-4 lg:px-0 pb-4">
         <h2 className="text-xs font-semibold text-[var(--muted-foreground)] mb-2 uppercase tracking-wider flex items-center gap-1.5">
           <CheckCircle2 size={13} /> תזכורות
         </h2>
@@ -254,7 +257,7 @@ export default function DashboardPage() {
       </div>
 
       {/* AI Suggestions */}
-      <div className="px-4 pb-4">
+      <div className="px-4 lg:px-0 pb-4">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider flex items-center gap-1.5">
             <Lightbulb size={13} /> תובנות AI
@@ -320,6 +323,8 @@ export default function DashboardPage() {
         )}
       </div>
 
+      </div>{/* end 2-col wrapper */}
+
       {/* Tip of the day */}
       {tip && (
         <div className="mx-4 mb-4 px-4 py-3 rounded-xl bg-[var(--primary)]/5 border border-[var(--primary)]/20">
@@ -331,7 +336,7 @@ export default function DashboardPage() {
       {/* Quick Actions */}
       <div className="px-4 pb-6">
         <h2 className="text-xs font-semibold text-[var(--muted-foreground)] mb-2 tracking-wider">פעולות מהירות</h2>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-4 lg:grid-cols-6 gap-2 lg:gap-3">
           <Link href="/" className="flex flex-col items-center gap-1.5 px-2 py-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] active:scale-95 transition-all">
             <MessageSquare size={20} className="text-[var(--primary)]" />
             <span className="text-[10px] font-medium">צ'אט</span>

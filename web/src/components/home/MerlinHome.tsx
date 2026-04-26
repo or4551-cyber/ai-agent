@@ -146,7 +146,7 @@ function QuickApps() {
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-3">
+    <div className="grid grid-cols-4 lg:grid-cols-6 gap-3 lg:gap-4">
       {apps.map((app) => {
         const Icon = app.icon;
         return (
@@ -247,20 +247,26 @@ export default function MerlinHome() {
 
   return (
     <div className="flex flex-col h-full overflow-y-auto scrollbar-hide">
-      <div className="flex flex-col gap-5 p-4 pb-28 max-w-lg mx-auto w-full">
+      <div className="flex flex-col gap-5 p-4 pb-28 max-w-lg lg:max-w-5xl mx-auto w-full">
         {/* Clock + Greeting */}
         <Clock />
 
         {/* Search bar */}
         <SearchBar />
 
-        {/* Health & Proximity */}
-        <HealthCard health={health} proximity={proximity} />
+        {/* Tablet: 2-column layout for health + alerts */}
+        <div className="flex flex-col lg:flex-row gap-5">
+          <div className="lg:flex-1">
+            <HealthCard health={health} proximity={proximity} />
+          </div>
+          {alerts.length > 0 && (
+            <div className="lg:flex-1">
+              <AlertsStrip alerts={alerts} />
+            </div>
+          )}
+        </div>
 
-        {/* Proactive Alerts */}
-        <AlertsStrip alerts={alerts} />
-
-        {/* Quick Apps */}
+        {/* Quick Apps — 6 cols on tablet */}
         <div>
           <div className="text-xs text-zinc-500 font-medium mb-3 px-1">גישה מהירה</div>
           <QuickApps />
