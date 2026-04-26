@@ -61,11 +61,11 @@ export class HealthMonitor {
     this.running = true;
     console.log('[HealthMonitor] Starting (check every 5 min)');
 
-    // Discover available sensors
-    this.discoverSensors();
-
-    // First reading
-    this.collect();
+    // Defer first reading so we don't block server startup
+    setTimeout(() => {
+      this.discoverSensors();
+      this.collect();
+    }, 10000);
 
     // Periodic readings
     this.timer = setInterval(() => this.collect(), CHECK_INTERVAL);

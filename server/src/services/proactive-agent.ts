@@ -89,7 +89,8 @@ export class ProactiveAgentService {
     console.log('[ProactiveAgent] Starting (check every 2 min)');
     this.deviceScanner.start();
     this.healthMonitor.start();
-    this.check();
+    // Defer first check so execSync calls don't block server startup
+    setTimeout(() => this.check(), 15000);
     this.timer = setInterval(() => this.check(), CHECK_INTERVAL);
   }
 

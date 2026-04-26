@@ -68,8 +68,8 @@ export class DeviceScanner {
     this.running = true;
     console.log('[DeviceScanner] Starting (scan every 5 min)');
     
-    // First scan
-    this.scan();
+    // Defer first scan so we don't block server startup
+    setTimeout(() => this.scan(), 8000);
     
     // Periodic scans
     this.timer = setInterval(() => this.scan(), SCAN_INTERVAL);
