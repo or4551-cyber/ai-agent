@@ -55,12 +55,24 @@ export class ProactiveAgentService {
   private onAiPrompt: ((prompt: string) => Promise<string>) | null = null;
   private deviceScanner: DeviceScanner;
   private healthMonitor: HealthMonitor;
+  private termuxApiAvailable: boolean | null = null;
 
   constructor() {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     this.state = this.loadState();
     this.deviceScanner = new DeviceScanner();
     this.healthMonitor = new HealthMonitor();
+  }
+
+  private hasTermuxApi(): boolean {
+    if (this.termuxApiAvailable !== null) return this.termuxApiAvailable;
+    try {
+      execSync('which termux-battery-status 2>/dev/null', { timeout: 2000 });
+      this.termuxApiAvailable = true;
+    } catch {
+      this.termuxApiAvailable = false;
+    }
+    return this.termuxApiAvailable;
   }
 
   private loadState(): ProactiveState {
@@ -152,14 +164,14 @@ export class ProactiveAgentService {
       this.goodNight();
     }
 
-    // Calendar — upcoming meetings (check every cycle)
-    this.checkUpcomingMeetings();
-
-    // Overdue reminders
+    // Overdue reminders (file-based, no termux-api needed)
     this.checkOverdueReminders();
 
-    // Battery-based suggestions
-    this.checkBatterySuggestions();
+    // These need termux-api
+    if (this.hasTermuxApi()) {
+      this.checkUpcomingMeetings();
+      this.checkBatterySuggestions();
+    }
 
     // Wellbeing check (alone + health anomalies)
     this.checkWellbeing();

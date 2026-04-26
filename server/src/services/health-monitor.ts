@@ -36,10 +36,23 @@ export class HealthMonitor {
   private readings: HealthReading[] = [];
   private running = false;
   private availableSensors: string[] = [];
+  private termuxApiAvailable: boolean | null = null;
 
   constructor() {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     this.loadReadings();
+  }
+
+  private hasTermuxApi(): boolean {
+    if (this.termuxApiAvailable !== null) return this.termuxApiAvailable;
+    try {
+      execSync('which termux-sensor 2>/dev/null', { timeout: 2000 });
+      this.termuxApiAvailable = true;
+    } catch {
+      this.termuxApiAvailable = false;
+      console.log('[HealthMonitor] termux-api not found — skipping health checks (install: pkg install termux-api)');
+    }
+    return this.termuxApiAvailable;
   }
 
   private loadReadings(): void {
@@ -63,6 +76,7 @@ export class HealthMonitor {
 
     // Defer first reading so we don't block server startup
     setTimeout(() => {
+      if (!this.hasTermuxApi()) return;
       this.discoverSensors();
       this.collect();
     }, 10000);
@@ -335,6 +349,7 @@ export class HealthMonitor {
 
   // ===== COLLECT READING =====
   private collect(): void {
+    if (!this.hasTermuxApi()) return;
     const heartRate = this.readHeartRate();
     const steps = this.readSteps();
     const accel = this.readAccelerometer();

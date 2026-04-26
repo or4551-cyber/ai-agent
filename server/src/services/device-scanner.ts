@@ -43,10 +43,23 @@ export class DeviceScanner {
   private timer: NodeJS.Timeout | null = null;
   private scans: DeviceScan[] = [];
   private running = false;
+  private termuxApiAvailable: boolean | null = null;
 
   constructor() {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     this.loadScans();
+  }
+
+  private hasTermuxApi(): boolean {
+    if (this.termuxApiAvailable !== null) return this.termuxApiAvailable;
+    try {
+      execSync('which termux-wifi-scaninfo 2>/dev/null', { timeout: 2000 });
+      this.termuxApiAvailable = true;
+    } catch {
+      this.termuxApiAvailable = false;
+      console.log('[DeviceScanner] termux-api not found — skipping scans (install: pkg install termux-api)');
+    }
+    return this.termuxApiAvailable;
   }
 
   private loadScans(): void {
@@ -111,6 +124,7 @@ export class DeviceScanner {
 
   // ===== FULL SCAN =====
   private scan(): void {
+    if (!this.hasTermuxApi()) return;
     const wifi = this.scanWifi();
     const bluetooth = this.scanBluetooth();
     
