@@ -1,0 +1,49 @@
+{
+  "version": "2.5.0",
+  "lastUpdated": "2026-04-26T21:00:00Z",
+  "updates": [
+    {
+      "id": "crash-shield-v1",
+      "version": "2.5.0",
+      "date": "2026-04-26",
+      "title": "CrashShield — שכבת הגנה מקיפה",
+      "summary": "שכבת הגנה חדשה שמונעת קריסות שרת. כוללת: ניטור זיכרון, מניעת OOM, ניהול agents, error budgets לשירותי רקע, והגנה על פלגינים.",
+      "changes": [
+        "ניטור זיכרון כל 30 שניות עם GC אוטומטי",
+        "מגבלת 5 agents במקביל עם ניקוי אוטומטי",
+        "Error budgets — שירותים שנכשלים הרבה מושהים",
+        "safeExec — wrapper בטוח ל-execSync",
+        "endpoint חדש: /api/shield-health"
+      ],
+      "type": "security"
+    },
+    {
+      "id": "plugin-install-fix",
+      "version": "2.4.1",
+      "date": "2026-04-26",
+      "title": "תיקון התקנת פלגינים",
+      "summary": "התקנת פלגינים כבר לא קורסת את השרת. תלויות מותקנות באופן async עם בדיקות מוקדמות.",
+      "changes": [
+        "Pre-flight checks לפני כל התקנה",
+        "התקנת תלויות עם spawn (לא חוסם event loop)",
+        "הודעות שגיאה ברורות עם פתרון אם נכשל",
+        "sandbox לפלגינים — timeout + הגבלת פלט"
+      ],
+      "type": "fix"
+    },
+    {
+      "id": "mission-control",
+      "version": "2.4.0",
+      "date": "2026-04-26",
+      "title": "Mission Control + Conversation Handoff",
+      "summary": "דשבורד Mission Control חדש עם מידע real-time ממכשירים מחוברים, ויכולת העברת שיחה בין מכשירים.",
+      "changes": [
+        "דשבורד Mission Control עם סטטוס real-time",
+        "העברת שיחה חלקה בין טלפון לטאבלט",
+        "שליחת הודעות בין מכשירים",
+        "שליטה מרחוק במכשירים"
+      ],
+      "type": "feature"
+    }
+  ]
+}

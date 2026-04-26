@@ -19,6 +19,7 @@ import { UserProfileService } from './user-profile';
 import { ConversationHistoryService } from './conversation-history';
 import { SmartAlertsService } from './smart-alerts';
 import { AgentMemory } from '../agent/memory';
+import { UpdateAwareness } from './update-awareness';
 
 export const reminderService = new ReminderService();
 export const routineService = new RoutineService();
@@ -29,3 +30,4 @@ export const userProfileService = new UserProfileService();
 export const conversationHistoryService = new ConversationHistoryService();
 export const smartAlertsService = new SmartAlertsService();
 export const agentMemory = new AgentMemory();
+export const updateAwareness = new UpdateAwareness();

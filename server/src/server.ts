@@ -28,6 +28,7 @@ import {
   userProfileService,
   conversationHistoryService as conversationHistory,
   smartAlertsService as smartAlerts,
+  updateAwareness,
 } from './services/registry';
 import {
   startCrashShield, getShieldHealth, registerAgent, unregisterAgent,
@@ -1660,6 +1661,13 @@ wss.on('connection', (ws: WebSocket, req) => {
 
   agents.set(connectionId, agent);
   registerAgent(connectionId);
+
+  // Send update greeting if Merlin was just updated
+  const updateGreeting = updateAwareness.getUpdateGreeting();
+  if (updateGreeting) {
+    safeSend(ws, JSON.stringify({ type: 'text_delta', payload: { text: updateGreeting } }));
+    safeSend(ws, JSON.stringify({ type: 'message_done', payload: { text: updateGreeting } }));
+  }
 
   ws.on('message', async (data: Buffer) => {
     touchAgent(connectionId);

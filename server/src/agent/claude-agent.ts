@@ -10,7 +10,7 @@ import { LocalLLM } from './local-llm';
 import { FavoritesService } from '../services/favorites';
 import { PersonalityEngine } from '../services/personality-engine';
 import { estimateTokens, trimHistory, trimSystemContext, validateToolPairing, stripOrphanedTools } from '../services/token-budget';
-import { agentMemory, userProfileService, favoritesService } from '../services/registry';
+import { agentMemory, userProfileService, favoritesService, updateAwareness } from '../services/registry';
 
 // Patterns that indicate a simple query answerable by local LLM (no tools needed)
 const LOCAL_LLM_PATTERNS = [
@@ -532,6 +532,7 @@ export class ClaudeAgent {
       { key: 'time', content: '', priority: 10 },  // time is injected by buildSystemPrompt
       { key: 'personality', content: this.personality.toContextString(), priority: 8 },
       { key: 'memory', content: this.memory.toContextString(), priority: 7 },
+      { key: 'updates', content: updateAwareness.toContextString(), priority: 6 },
       { key: 'userProfile', content: this.userProfile.toContextString(), priority: 5 },
       { key: 'favorites', content: this.favorites.toContextString(), priority: 4 },
     ];
@@ -550,6 +551,7 @@ export class ClaudeAgent {
         memoryContext: contextMap['memory'] || '',
         favoritesContext: contextMap['favorites'] || '',
         personalityContext: contextMap['personality'] || '',
+        updateContext: contextMap['updates'] || '',
         liveMode: this.liveMode,
       });
     }
@@ -560,6 +562,7 @@ export class ClaudeAgent {
       memoryContext: this.memory.toContextString(),
       favoritesContext: this.favorites.toContextString(),
       personalityContext: this.personality.toContextString(),
+      updateContext: updateAwareness.toContextString(),
       liveMode: this.liveMode,
     });
   }

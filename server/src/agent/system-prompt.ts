@@ -131,6 +131,7 @@ export function buildSystemPrompt(context: {
   timeContext?: string;
   favoritesContext?: string;
   personalityContext?: string;
+  updateContext?: string;
   liveMode?: boolean;
 }): string {
   let prompt = BASE_PROMPT;
@@ -165,6 +166,11 @@ export function buildSystemPrompt(context: {
   // Deep personality (Digital Twin)
   if (context.personalityContext) {
     prompt += context.personalityContext;
+  }
+
+  // Recent updates awareness
+  if (context.updateContext) {
+    prompt += context.updateContext;
   }
 
   // Live voice mode — keep responses ultra-short
