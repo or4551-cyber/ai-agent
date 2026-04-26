@@ -459,7 +459,7 @@ async function executeToolInternal(
       // Try catalog first
       const catalogEntry = getCatalogEntry(name);
       if (catalogEntry) {
-        return pm.install(
+        return await pm.install(
           catalogEntry.name,
           catalogEntry.description,
           catalogEntry.handlerCode,
@@ -484,7 +484,7 @@ async function executeToolInternal(
         return `❌ פלגין "${name}" לא נמצא בקטלוג. ליצירת פלגין מותאם, ספק: description, handler_code ו-input_schema.`;
       }
 
-      return pm.install(name, desc, handlerCode, schema || { type: 'object', properties: {} }, {
+      return await pm.install(name, desc, handlerCode, schema || { type: 'object', properties: {} }, {
         source: 'ai-generated',
         dependencies: deps,
       });

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import { ToolDefinition, DangerLevel } from '../types';
 
 const DATA_DIR = path.join(process.env.HOME || '.', '.ai-agent');
@@ -69,7 +69,66 @@ export class PluginManager {
     });
   }
 
-  install(
+  // ===== PRE-FLIGHT: check if dependencies are available BEFORE installing =====
+  private checkDependencies(deps: string[]): { available: string[]; missing: string[]; canAutoInstall: boolean } {
+    const available: string[] = [];
+    const missing: string[] = [];
+
+    for (const dep of deps) {
+      try {
+        execSync(`which ${dep} 2>/dev/null`, { timeout: 3000, stdio: 'pipe' });
+        available.push(dep);
+      } catch {
+        missing.push(dep);
+      }
+    }
+
+    // Check if pkg exists (Termux package manager)
+    let canAutoInstall = false;
+    if (missing.length > 0) {
+      try {
+        execSync('which pkg 2>/dev/null', { timeout: 3000, stdio: 'pipe' });
+        canAutoInstall = true;
+      } catch {}
+    }
+
+    return { available, missing, canAutoInstall };
+  }
+
+  // Non-blocking dependency install using spawn (won't crash server)
+  private installDependencyAsync(dep: string): Promise<{ success: boolean; output: string }> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        child.kill();
+        resolve({ success: false, output: `timeout installing ${dep}` });
+      }, 120000);
+
+      const child = spawn('pkg', ['install', '-y', dep], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 120000,
+      });
+
+      let stdout = '';
+      let stderr = '';
+      child.stdout?.on('data', (d) => { stdout += d.toString().slice(-500); });
+      child.stderr?.on('data', (d) => { stderr += d.toString().slice(-500); });
+
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        resolve({
+          success: code === 0,
+          output: code === 0 ? stdout.slice(-200) : stderr.slice(-200),
+        });
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        resolve({ success: false, output: err.message });
+      });
+    });
+  }
+
+  async install(
     name: string,
     description: string,
     handlerCode: string,
@@ -81,31 +140,70 @@ export class PluginManager {
       source?: 'catalog' | 'custom' | 'ai-generated';
       dependencies?: string[];
     } = {}
-  ): string {
+  ): Promise<string> {
     const pluginDir = path.join(PLUGINS_DIR, name);
-    
-    // Check if already installed
+
+    // === PRE-CHECK 1: Already installed? ===
     if (this.plugins.has(name)) {
       return `⚠️ פלגין "${name}" כבר מותקן. השתמש ב-plugin_uninstall קודם אם רוצה להתקין מחדש.`;
     }
 
-    try {
-      fs.mkdirSync(pluginDir, { recursive: true });
+    // === PRE-CHECK 2: Dependencies ===
+    const deps = options.dependencies || [];
+    const depStatus = deps.length > 0 ? this.checkDependencies(deps) : { available: [], missing: [], canAutoInstall: false };
 
-      // Install dependencies if needed
-      if (options.dependencies && options.dependencies.length > 0) {
-        for (const dep of options.dependencies) {
-          try {
-            execSync(`which ${dep} 2>/dev/null || pkg install -y ${dep} 2>/dev/null`, { timeout: 60000 });
-          } catch {
-            // Try pip as fallback
-            try {
-              execSync(`pip install ${dep} 2>/dev/null`, { timeout: 60000 });
-            } catch {}
-          }
+    if (depStatus.missing.length > 0) {
+      if (!depStatus.canAutoInstall) {
+        // Can't auto-install — tell the user what to do
+        return [
+          `❌ לא ניתן להתקין פלגין "${name}" — חסרות תלויות:`,
+          `   חסר: ${depStatus.missing.join(', ')}`,
+          `   pkg לא זמין להתקנה אוטומטית.`,
+          ``,
+          `🔧 פתרון — הרץ ידנית ב-Termux:`,
+          ...depStatus.missing.map(d => `   pkg install -y ${d}`),
+          ``,
+          `ואז נסה שוב להתקין את הפלגין.`,
+        ].join('\n');
+      }
+
+      // Try to auto-install missing deps (non-blocking!)
+      console.log(`[Plugins] Installing missing deps for ${name}: ${depStatus.missing.join(', ')}`);
+      const results: string[] = [];
+      const failures: string[] = [];
+
+      for (const dep of depStatus.missing) {
+        const result = await this.installDependencyAsync(dep);
+        if (result.success) {
+          results.push(`✅ ${dep} הותקן`);
+        } else {
+          failures.push(dep);
+          results.push(`❌ ${dep} נכשל: ${result.output.slice(0, 100)}`);
         }
       }
 
+      if (failures.length > 0) {
+        return [
+          `❌ התקנת תלויות נכשלה עבור פלגין "${name}":`,
+          ...results,
+          ``,
+          `🔧 פתרון — הרץ ידנית ב-Termux:`,
+          ...failures.map(d => `   pkg install -y ${d}`),
+          ``,
+          `ואז נסה שוב: "תתקין את פלגין ${name}"`,
+        ].join('\n');
+      }
+    }
+
+    // === PRE-CHECK 3: Can write to plugins dir? ===
+    try {
+      fs.mkdirSync(pluginDir, { recursive: true });
+    } catch (err) {
+      return `❌ לא ניתן ליצור תיקיית פלגין: ${(err as Error).message}\nבדוק הרשאות ל-${PLUGINS_DIR}`;
+    }
+
+    // === ALL CHECKS PASSED — INSTALL ===
+    try {
       const meta: PluginMeta = {
         name,
         description,
@@ -138,7 +236,7 @@ export class PluginManager {
 
       // Make executable
       try {
-        execSync(`chmod +x "${path.join(pluginDir, 'handler.sh')}" 2>/dev/null`, { timeout: 3000 });
+        execSync(`chmod +x "${path.join(pluginDir, 'handler.sh')}" 2>/dev/null`, { timeout: 3000, stdio: 'pipe' });
       } catch {}
 
       // Load into memory
@@ -153,7 +251,7 @@ export class PluginManager {
         `📝 ${description}`,
         `🔧 כלי חדש: plugin_${name}`,
         `📂 ${pluginDir}`,
-        options.dependencies?.length ? `📦 תלויות: ${options.dependencies.join(', ')}` : '',
+        deps.length ? `📦 תלויות: ${deps.join(', ')} (${depStatus.missing.length > 0 ? 'הותקנו עכשיו' : 'כולן זמינות'})` : '',
       ].filter(Boolean).join('\n');
     } catch (err) {
       // Cleanup on failure
