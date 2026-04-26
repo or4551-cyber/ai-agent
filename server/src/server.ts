@@ -1594,8 +1594,14 @@ function killPortHolder(port: number): void {
         if (oldPid) execSync(`kill -9 ${oldPid} 2>/dev/null || true`, { timeout: 2000 });
       }
     },
-    // Method 2: pkill (most available on Termux)
-    () => execSync(`pkill -9 -f "node.*server" 2>/dev/null || true`, { timeout: 2000 }),
+    // Method 2: kill other node server processes (exclude ourselves)
+    () => {
+      const myPid = process.pid;
+      const pids = execSync(`pgrep -f "node.*server" 2>/dev/null || true`, { timeout: 2000 }).toString().trim().split('\n').filter(p => p && p.trim() !== String(myPid));
+      for (const pid of pids) {
+        try { execSync(`kill -9 ${pid.trim()} 2>/dev/null || true`, { timeout: 1000 }); } catch {}
+      }
+    },
     // Method 3: fuser
     () => execSync(`fuser -k ${port}/tcp 2>/dev/null || true`, { timeout: 3000 }),
     // Method 4: lsof
