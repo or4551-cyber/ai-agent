@@ -377,6 +377,56 @@ export async function activateVoiceDaemon(): Promise<{ message: string; status: 
   return apiFetch('/api/voice-daemon/activate', { method: 'POST' });
 }
 
+// ===== DEVICE SYNC =====
+
+export interface DevicePeer {
+  id: string;
+  name: string;
+  type: string;
+  model: string;
+  online: boolean;
+  ip?: string;
+  latencyMs?: number;
+  lastSeen: string;
+}
+
+export interface DeviceStatus {
+  device: { id: string; name: string; type: string; model: string };
+  peers: DevicePeer[];
+  onlinePeers: number;
+  totalPeers: number;
+}
+
+export interface InboxMessage {
+  id: string;
+  from: string;
+  fromName: string;
+  fromType: string;
+  type: string;
+  payload: Record<string, unknown>;
+  timestamp: number;
+  read: boolean;
+}
+
+export async function getDeviceStatus(): Promise<DeviceStatus> {
+  return apiFetch('/api/device-sync/status');
+}
+
+export async function getDeviceInbox(): Promise<{ messages: InboxMessage[]; unread: number }> {
+  return apiFetch('/api/device-sync/inbox');
+}
+
+export async function markInboxRead(): Promise<void> {
+  return apiFetch('/api/device-sync/inbox/read', { method: 'POST' });
+}
+
+export async function sendToDevice(peerId: string, type: string, payload: Record<string, unknown>): Promise<{ success: boolean }> {
+  return apiFetch('/api/device-sync/send', {
+    method: 'POST',
+    body: JSON.stringify({ peerId, type, payload }),
+  });
+}
+
 // ===== CONVERSATION EXPORT =====
 
 export function getExportUrl(id: string): string {

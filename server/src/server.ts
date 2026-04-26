@@ -405,9 +405,39 @@ app.get('/api/device-sync/file/:name', (req, res) => {
   res.type('application/json').send(content);
 });
 
+// Cross-device message inbox (in-memory, last 50 messages)
+const deviceInbox: Array<{ id: string; from: string; fromName: string; fromType: string; type: string; payload: Record<string, unknown>; timestamp: number; read: boolean }> = [];
+
 app.post('/api/device-sync/message', express.json(), (req, res) => {
   if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
-  deviceSync.handleIncomingMessage(req.body);
+  const msg = req.body;
+  deviceSync.handleIncomingMessage(msg);
+
+  // Store in inbox
+  const peer = deviceSync.getPeers().find(p => p.id === msg.from);
+  deviceInbox.unshift({
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    from: msg.from,
+    fromName: peer?.name || msg.from,
+    fromType: peer?.type || 'unknown',
+    type: msg.type,
+    payload: msg.payload || {},
+    timestamp: msg.timestamp || Date.now(),
+    read: false,
+  });
+  // Keep only last 50
+  while (deviceInbox.length > 50) deviceInbox.pop();
+
+  res.json({ ok: true });
+});
+
+app.get('/api/device-sync/inbox', authMiddleware, (_req, res) => {
+  const unread = deviceInbox.filter(m => !m.read).length;
+  res.json({ messages: deviceInbox.slice(0, 20), unread });
+});
+
+app.post('/api/device-sync/inbox/read', authMiddleware, (_req, res) => {
+  for (const m of deviceInbox) m.read = true;
   res.json({ ok: true });
 });
 

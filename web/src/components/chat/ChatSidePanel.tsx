@@ -4,12 +4,14 @@ import { useState, useEffect } from 'react';
 import {
   CheckCircle2, Circle, Plus, Sparkles, Brain, Activity,
   Heart, Footprints, Users, Smartphone, Tablet, Monitor,
-  FolderOpen, Image, Star, ChevronRight, X,
+  FolderOpen, Image, Star, ChevronRight, X, Send, Bell,
+  MessageCircle, ArrowUpRight,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
   getReminders, completeReminder, addReminder, Reminder,
   getHealthStatus, getProximityStatus, HealthStatus, ProximityStatus,
+  getDeviceInbox, markInboxRead, sendToDevice, InboxMessage,
 } from '@/lib/api';
 
 const DEVICE_ICONS: Record<string, typeof Smartphone> = {
@@ -33,6 +35,10 @@ export default function ChatSidePanel({ onClose }: { onClose?: () => void }) {
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [proximity, setProximity] = useState<ProximityStatus | null>(null);
   const [peers, setPeers] = useState<Peer[]>([]);
+  const [inbox, setInbox] = useState<InboxMessage[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [quickMsg, setQuickMsg] = useState('');
+  const [sendingTo, setSendingTo] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -56,6 +62,12 @@ export default function ChatSidePanel({ onClose }: { onClose?: () => void }) {
           const data = await res.json();
           setPeers(data.peers || []);
         }
+      } catch {}
+
+      try {
+        const inboxData = await getDeviceInbox();
+        setInbox(inboxData.messages || []);
+        setUnreadCount(inboxData.unread || 0);
       } catch {}
     };
 
@@ -181,6 +193,85 @@ export default function ChatSidePanel({ onClose }: { onClose?: () => void }) {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Send to Device */}
+        {peers.filter(p => p.online).length > 0 && (
+          <div>
+            <div className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Send size={11} /> שלח למכשיר
+            </div>
+            {peers.filter(p => p.online).map(peer => (
+              <div key={peer.id} className="mb-2">
+                <div className="flex gap-1.5">
+                  <input
+                    value={sendingTo === peer.id ? quickMsg : ''}
+                    onChange={(e) => { setSendingTo(peer.id); setQuickMsg(e.target.value); }}
+                    onFocus={() => setSendingTo(peer.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && quickMsg.trim()) {
+                        sendToDevice(peer.id, 'notification', { title: 'הודעה מ-Merlin', message: quickMsg.trim() });
+                        setQuickMsg('');
+                      }
+                    }}
+                    placeholder={`שלח ל${peer.name}...`}
+                    dir="auto"
+                    className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-1.5 text-[11px] focus:outline-none focus:border-[var(--primary)]"
+                  />
+                  <button
+                    onClick={() => {
+                      if (quickMsg.trim()) {
+                        sendToDevice(peer.id, 'notification', { title: 'הודעה מ-Merlin', message: quickMsg.trim() });
+                        setQuickMsg('');
+                      }
+                    }}
+                    disabled={!quickMsg.trim() || sendingTo !== peer.id}
+                    className="px-2 py-1.5 rounded-lg bg-[var(--primary)] text-white text-[11px] disabled:opacity-30"
+                  >
+                    <ArrowUpRight size={12} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Inbox Messages */}
+        {inbox.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase tracking-wider flex items-center gap-1.5">
+                <Bell size={11} /> הודעות נכנסות
+                {unreadCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">{unreadCount}</span>
+                )}
+              </div>
+              {unreadCount > 0 && (
+                <button
+                  onClick={() => { markInboxRead(); setUnreadCount(0); setInbox(prev => prev.map(m => ({ ...m, read: true }))); }}
+                  className="text-[9px] text-[var(--primary)] hover:underline"
+                >
+                  סמן הכל כנקרא
+                </button>
+              )}
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto scrollbar-hide">
+              {inbox.slice(0, 5).map(msg => (
+                <div
+                  key={msg.id}
+                  className={`px-2 py-1.5 rounded-lg border border-[var(--border)] text-[11px] ${!msg.read ? 'bg-[var(--primary)]/5 border-[var(--primary)]/20' : 'bg-[var(--card)]'}`}
+                >
+                  <div className="flex items-center gap-1 text-[9px] text-[var(--muted-foreground)] mb-0.5">
+                    <MessageCircle size={9} />
+                    <span className="font-medium">{msg.fromName}</span>
+                    <span>·</span>
+                    <span>{new Date(msg.timestamp).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                  <div className="truncate">{(msg.payload?.message as string) || (msg.payload?.title as string) || msg.type}</div>
+                </div>
+              ))}
             </div>
           </div>
         )}
