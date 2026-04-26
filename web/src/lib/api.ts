@@ -449,6 +449,13 @@ export async function proxyToDevice(peerId: string, apiPath: string, method = 'G
   });
 }
 
+export async function sendHandoff(peerId: string): Promise<{ success: boolean; messageCount: number }> {
+  return apiFetch('/api/device-sync/handoff/send', {
+    method: 'POST',
+    body: JSON.stringify({ peerId }),
+  });
+}
+
 // ===== CONVERSATION EXPORT =====
 
 export function getExportUrl(id: string): string {

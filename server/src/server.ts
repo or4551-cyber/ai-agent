@@ -561,6 +561,135 @@ app.post('/api/device-sync/proxy', authMiddleware, async (req, res) => {
   }
 });
 
+// ===== CONVERSATION HANDOFF =====
+
+// Helper: get the most recently active agent
+function getActiveAgent(): any {
+  let latest: any = null;
+  for (const a of agents.values()) latest = a;
+  return latest;
+}
+
+// Export current active conversation for handoff
+app.get('/api/device-sync/handoff/export', authMiddleware, (_req, res) => {
+  try {
+    const activeAgent = getActiveAgent();
+    const snap = activeAgent?.getConversationSnapshot();
+    if (!snap || snap.messages.length === 0) {
+      res.status(404).json({ error: 'No active conversation' });
+      return;
+    }
+    const deviceName = deviceSync?.getIdentity().name || 'unknown';
+    res.json({
+      conversationId: snap.id,
+      messages: snap.messages,
+      fromDevice: deviceName,
+      fromDeviceId: deviceSync?.getIdentity().id,
+      timestamp: Date.now(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Receive a conversation handoff from another device (no auth — peer access)
+app.post('/api/device-sync/handoff/receive', express.json({ limit: '5mb' }), (req, res) => {
+  try {
+    const { conversationId, messages, fromDevice, fromDeviceId } = req.body;
+    if (!messages || !Array.isArray(messages)) {
+      res.status(400).json({ error: 'messages array required' });
+      return;
+    }
+
+    // Save as a new conversation in history
+    const handoffId = `handoff-${Date.now()}`;
+    conversationHistory.save({
+      id: handoffId,
+      title: `המשך שיחה מ-${fromDevice || 'מכשיר אחר'}`,
+      messages: messages.map((m: any, i: number) => ({
+        id: `${handoffId}-${i}`,
+        role: m.role,
+        content: m.content,
+        timestamp: m.timestamp || Date.now(),
+      })),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    // Note: the receiving device will load this from history when opening chat
+
+    // Store in inbox for UI notification
+    deviceInbox.unshift({
+      id: `msg-handoff-${Date.now()}`,
+      from: fromDeviceId || 'unknown',
+      fromName: fromDevice || 'מכשיר אחר',
+      fromType: 'unknown',
+      type: 'handoff',
+      payload: {
+        title: `שיחה הועברה מ-${fromDevice}`,
+        message: `${messages.length} הודעות הועברו. פתח את הצ'אט להמשיך.`,
+        conversationId: handoffId,
+      },
+      timestamp: Date.now(),
+      read: false,
+    });
+    while (deviceInbox.length > 50) deviceInbox.pop();
+
+    res.json({ success: true, conversationId: handoffId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Trigger handoff: export from here → send to peer
+app.post('/api/device-sync/handoff/send', authMiddleware, async (req, res) => {
+  if (!deviceSync) { res.status(503).json({ error: 'DeviceSync not available' }); return; }
+  const { peerId } = req.body;
+  if (!peerId) { res.status(400).json({ error: 'peerId required' }); return; }
+
+  const peer = deviceSync.getPeers().find(p => p.id === peerId);
+  if (!peer?.online || !peer.ip) { res.status(404).json({ error: 'Peer not online' }); return; }
+
+  try {
+    // Get current conversation
+    const activeAgent = getActiveAgent();
+    const snap = activeAgent?.getConversationSnapshot();
+    if (!snap || snap.messages.length === 0) {
+      res.status(404).json({ error: 'No active conversation to handoff' });
+      return;
+    }
+
+    const handoffData = {
+      conversationId: snap.id,
+      messages: snap.messages,
+      fromDevice: deviceSync.getIdentity().name,
+      fromDeviceId: deviceSync.getIdentity().id,
+    };
+
+    // Send to peer
+    const http = require('http');
+    const body = JSON.stringify(handoffData);
+    await new Promise<void>((resolve, reject) => {
+      const proxyReq = http.request({
+        hostname: peer.ip,
+        port: peer.port,
+        path: '/api/device-sync/handoff/receive',
+        method: 'POST',
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      }, (proxyRes: any) => { proxyRes.resume(); resolve(); });
+      proxyReq.on('error', reject);
+      proxyReq.on('timeout', () => { proxyReq.destroy(); reject(new Error('timeout')); });
+      proxyReq.write(body);
+      proxyReq.end();
+    });
+
+    res.json({ success: true, messageCount: snap.messages.length });
+  } catch (err: any) {
+    res.status(502).json({ error: `Handoff failed: ${err.message}` });
+  }
+});
+
 // ===== OBSERVER API =====
 
 app.get('/api/observer/status', authMiddleware, (_req, res) => {

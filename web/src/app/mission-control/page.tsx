@@ -11,7 +11,7 @@ import {
 import {
   getDeviceStatus, DevicePeer, RemoteQuickStatus,
   getRemoteQuickStatus, sendToDevice, proxyToDevice,
-  getHealthStatus, HealthStatus,
+  getHealthStatus, HealthStatus, sendHandoff,
 } from '@/lib/api';
 
 const DEVICE_ICONS: Record<string, typeof Smartphone> = {
@@ -76,6 +76,20 @@ export default function MissionControlPage() {
     const interval = setInterval(refresh, 30000);
     return () => clearInterval(interval);
   }, [refresh]);
+
+  const doHandoff = async (peerId: string) => {
+    try {
+      const result = await sendHandoff(peerId);
+      if (result.success) {
+        setActionFeedback(`שיחה הועברה (${result.messageCount} הודעות)`);
+      } else {
+        setActionFeedback('אין שיחה פעילה להעברה');
+      }
+    } catch {
+      setActionFeedback('שגיאה בהעברת שיחה');
+    }
+    setTimeout(() => setActionFeedback(null), 3000);
+  };
 
   const sendRemoteAction = async (peerId: string, action: string) => {
     try {
@@ -188,6 +202,13 @@ export default function MissionControlPage() {
                         );
                       })}
                     </div>
+                    {/* Handoff */}
+                    <button
+                      onClick={() => doHandoff(peer.id)}
+                      className="w-full py-2 mb-3 rounded-xl bg-gradient-to-r from-[var(--primary)] to-purple-600 text-white text-[11px] font-medium hover:opacity-90 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                    >
+                      <ArrowUpRight size={12} /> העבר שיחה ל{peer.name}
+                    </button>
                     {/* Quick message */}
                     <div className="flex gap-1.5">
                       <input
