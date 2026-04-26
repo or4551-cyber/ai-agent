@@ -40,8 +40,15 @@ CRASH_COUNT=0
 SERVER_PID=0
 
 while true; do
-  # Kill any stale node on our port
+  # Kill any stale node on our port (try all methods)
+  PID_FILE="$HOME/.ai-agent/merlin.pid"
+  if [ -f "$PID_FILE" ]; then
+    kill -9 "$(cat "$PID_FILE")" 2>/dev/null || true
+    rm -f "$PID_FILE"
+  fi
+  fuser -k 3002/tcp 2>/dev/null || true
   kill -9 $(lsof -t -i:3002) 2>/dev/null || true
+  pkill -9 -f "node dist/server" 2>/dev/null || true
   sleep 1
 
   echo ""

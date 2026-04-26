@@ -1582,31 +1582,76 @@ if (process.env.AUTO_VOICE_DAEMON === 'true') {
   }, 5000);
 }
 
+// ===== PID FILE =====
+const PID_FILE = path.join(process.env.HOME || '.', '.ai-agent', 'merlin.pid');
+
+function killPortHolder(port: number): void {
+  // Method 1: PID file from previous run
+  try {
+    if (fs.existsSync(PID_FILE)) {
+      const oldPid = fs.readFileSync(PID_FILE, 'utf-8').trim();
+      if (oldPid) {
+        execSync(`kill -9 ${oldPid} 2>/dev/null || true`, { timeout: 2000 });
+        console.log(`[Server] Killed previous process (PID ${oldPid})`);
+      }
+    }
+  } catch {}
+
+  // Method 2: fuser (most reliable on Termux)
+  try {
+    execSync(`fuser -k ${port}/tcp 2>/dev/null || true`, { timeout: 3000 });
+  } catch {}
+
+  // Method 3: lsof (might not be installed)
+  try {
+    execSync(`kill -9 $(lsof -t -i:${port}) 2>/dev/null || true`, { timeout: 3000 });
+  } catch {}
+}
+
+function writePidFile(): void {
+  try {
+    const dir = path.dirname(PID_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(PID_FILE, String(process.pid));
+  } catch {}
+}
+
+// Clean up PID file on exit
+process.on('exit', () => { try { fs.unlinkSync(PID_FILE); } catch {} });
+
 // ===== START =====
+// Kill any previous instance before trying to listen
+killPortHolder(PORT);
+
+let listenRetries = 0;
+function startListening(): void {
+  server.listen(PORT, '0.0.0.0', () => {
+    writePidFile();
+    console.log('');
+    console.log('╔════════════════════════════════════════╗');
+    console.log('║       🤖 AI Agent Server Running       ║');
+    console.log('╠════════════════════════════════════════╣');
+    console.log(`║  HTTP: http://localhost:${PORT}           ║`);
+    console.log(`║  WS:   ws://localhost:${PORT}/ws          ║`);
+    console.log('║                                        ║');
+    console.log('║  Open Chrome on your phone:            ║');
+    console.log(`║  http://localhost:${PORT}                  ║`);
+    console.log('╚════════════════════════════════════════╝');
+    console.log('');
+  });
+}
+
 server.on('error', (err: NodeJS.ErrnoException) => {
-  if (err.code === 'EADDRINUSE') {
-    console.log(`[Server] Port ${PORT} is busy. Killing previous process...`);
-    try {
-      execSync(`kill -9 $(lsof -t -i:${PORT}) 2>/dev/null || true`, { timeout: 3000 });
-    } catch {}
-    setTimeout(() => {
-      server.listen(PORT, '0.0.0.0');
-    }, 1500);
+  if (err.code === 'EADDRINUSE' && listenRetries < 3) {
+    listenRetries++;
+    console.log(`[Server] Port ${PORT} busy — killing old process (attempt ${listenRetries}/3)...`);
+    killPortHolder(PORT);
+    setTimeout(() => startListening(), 2000);
   } else {
     console.error('[Server] Fatal error:', err.message);
+    process.exit(1);
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log('');
-  console.log('╔════════════════════════════════════════╗');
-  console.log('║       🤖 AI Agent Server Running       ║');
-  console.log('╠════════════════════════════════════════╣');
-  console.log(`║  HTTP: http://localhost:${PORT}           ║`);
-  console.log(`║  WS:   ws://localhost:${PORT}/ws          ║`);
-  console.log('║                                        ║');
-  console.log('║  Open Chrome on your phone:            ║');
-  console.log(`║  http://localhost:${PORT}                  ║`);
-  console.log('╚════════════════════════════════════════╝');
-  console.log('');
-});
+// Initial delay to let killPortHolder take effect
+setTimeout(() => startListening(), 1000);
