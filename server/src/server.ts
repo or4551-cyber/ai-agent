@@ -13,7 +13,7 @@ import { ObserverService } from './observer/service';
 import { generateBriefing } from './services/briefing';
 import { tryOfflineCommand } from './agent/offline-commands';
 import { LocalLLM } from './agent/local-llm';
-import { getAuthUrl, handleCallback, getGoogleStatus } from './tools/google-auth';
+import { getAuthUrl, handleCallback, getGoogleStatus, initGoogleAuth } from './tools/google-auth';
 import { ProactiveAgentService } from './services/proactive-agent';
 import { VoiceDaemon } from './services/voice-daemon';
 import { PersonalityEngine } from './services/personality-engine';
@@ -92,6 +92,9 @@ try {
   console.error('[DeviceSync] Failed to start (server continues):', (err as Error).message);
 }
 const AUTH_TOKEN = process.env.AUTH_TOKEN || 'dev-token';
+
+// Pre-refresh Google token on startup so it survives server restarts
+initGoogleAuth().catch(err => console.warn('[GOOGLE] Init failed (non-fatal):', (err as Error).message));
 const FRONTEND_DIR = path.join(__dirname, '..', '..', 'web', 'out');
 
 // Path-traversal protection: only allow file ops inside these roots

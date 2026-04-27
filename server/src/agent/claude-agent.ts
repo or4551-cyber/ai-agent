@@ -71,6 +71,9 @@ export class ClaudeAgent {
   private conversationId: string;
   private usage = { inputTokens: 0, outputTokens: 0, totalCost: 0 };
 
+  // Session intent tracker — compact log of what user asked for (survives history trimming)
+  private sessionIntents: string[] = [];
+
   // Pricing per million tokens
   private static PRICING: Record<string, { input: number; output: number }> = {
     'claude-sonnet-4-6': { input: 3, output: 15 },
@@ -222,16 +225,24 @@ export class ClaudeAgent {
       userContent = userMessage;
     }
 
+    // Track user intent (survives history trimming)
+    if (userMessage.length > 3) {
+      this.sessionIntents.push(userMessage.substring(0, 200));
+      // Keep last 15 intents
+      if (this.sessionIntents.length > 15) this.sessionIntents.shift();
+    }
+
     this.conversationHistory.push({
       role: 'user',
       content: userContent,
     });
 
     // === TOKEN BUDGET: trim history if too large ===
+    // Tool-heavy convos need more history — each tool_use/tool_result pair = 2 messages
     const { messages: trimmedHistory, trimmed } = trimHistory(
       this.conversationHistory as { role: 'user' | 'assistant'; content: string | any[] }[],
-      12000, // max history tokens
-      10,    // keep last 10 messages
+      16000, // max history tokens (increased for tool-heavy flows)
+      20,    // keep last 20 messages (tool pairs eat 2 msgs each)
     );
     if (trimmed) {
       console.log(`[Agent] History trimmed: ${this.conversationHistory.length} → ${trimmedHistory.length} messages`);
@@ -426,10 +437,16 @@ export class ClaudeAgent {
             result = 'Action cancelled by user.';
           }
 
+          // Truncate large tool outputs to prevent history bloat
+          const MAX_TOOL_OUTPUT = 2000;
+          const truncatedResult = result.length > MAX_TOOL_OUTPUT
+            ? result.substring(0, MAX_TOOL_OUTPUT) + `\n...[חתוך — ${result.length} תווים]`
+            : result;
+
           toolResults.push({
             type: 'tool_result',
             tool_use_id: block.id,
-            content: result,
+            content: truncatedResult,
           });
 
           this.onEvent({
@@ -528,8 +545,14 @@ export class ClaudeAgent {
   private buildBudgetedSystemPrompt(): string {
     const MAX_CONTEXT_TOKENS = 3000;
 
+    // Build session intent context (highest priority — never lose track of what user asked)
+    const intentContext = this.sessionIntents.length > 0
+      ? `\n## מה המשתמש ביקש בשיחה הזו (לא לשכוח!)\n${this.sessionIntents.map((intent, i) => `${i + 1}. ${intent}`).join('\n')}\nחשוב: תמיד תזכור את הבקשות האלה, גם אם חלק מהשיחה נחתך.\n`
+      : '';
+
     const sections = [
       { key: 'time', content: '', priority: 10 },  // time is injected by buildSystemPrompt
+      { key: 'intents', content: intentContext, priority: 9 },  // session intents — never trim
       { key: 'personality', content: this.personality.toContextString(), priority: 8 },
       { key: 'memory', content: this.memory.toContextString(), priority: 7 },
       { key: 'updates', content: updateAwareness.toContextString(), priority: 6 },
@@ -552,6 +575,7 @@ export class ClaudeAgent {
         favoritesContext: contextMap['favorites'] || '',
         personalityContext: contextMap['personality'] || '',
         updateContext: contextMap['updates'] || '',
+        sessionIntentsContext: contextMap['intents'] || '',
         liveMode: this.liveMode,
       });
     }
@@ -563,6 +587,7 @@ export class ClaudeAgent {
       favoritesContext: this.favorites.toContextString(),
       personalityContext: this.personality.toContextString(),
       updateContext: updateAwareness.toContextString(),
+      sessionIntentsContext: intentContext,
       liveMode: this.liveMode,
     });
   }

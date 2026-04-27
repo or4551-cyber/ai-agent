@@ -28,6 +28,11 @@ function getCredentials() {
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const redirectUri = process.env.GOOGLE_REDIRECT_URI || `http://localhost:${process.env.PORT || 3002}/api/google/callback`;
   if (!clientId || !clientSecret) return null;
+  // Detect placeholder values
+  if (clientId.includes('your-client-id') || clientSecret.includes('your-client-secret')) {
+    console.warn('[GOOGLE] Placeholder credentials detected in .env — Google integration disabled');
+    return null;
+  }
   return { clientId, clientSecret, redirectUri };
 }
 
@@ -159,10 +164,38 @@ export function isAuthenticated(): boolean {
   return !!(token && token.access_token);
 }
 
-export function getGoogleStatus(): { configured: boolean; authenticated: boolean; authUrl: string | null } {
+export function getGoogleStatus(): { configured: boolean; authenticated: boolean; authUrl: string | null; placeholderCreds: boolean } {
+  const clientId = process.env.GOOGLE_CLIENT_ID || '';
+  const placeholderCreds = clientId.includes('your-client-id') || !clientId;
   const creds = getCredentials();
   const configured = !!creds;
   const authenticated = isAuthenticated();
   const authUrl = !authenticated ? getAuthUrl() : null;
-  return { configured, authenticated, authUrl };
+  return { configured, authenticated, authUrl, placeholderCreds };
+}
+
+// Call on server startup — silently validate and refresh token if needed
+export async function initGoogleAuth(): Promise<void> {
+  const creds = getCredentials();
+  if (!creds) {
+    const clientId = process.env.GOOGLE_CLIENT_ID || '';
+    if (clientId.includes('your-client-id')) {
+      console.log('[GOOGLE] Placeholder credentials — skipping init. Set real credentials in .env');
+    } else if (!clientId) {
+      console.log('[GOOGLE] No GOOGLE_CLIENT_ID set — Google disabled');
+    }
+    return;
+  }
+  const token = loadToken();
+  if (!token?.refresh_token) {
+    console.log('[GOOGLE] No saved token — user needs to auth via /api/google/auth');
+    return;
+  }
+  // Pre-refresh the access token so Google works immediately
+  const newToken = await refreshAccessToken();
+  if (newToken) {
+    console.log('[GOOGLE] ✅ Token refreshed on startup — Google connected');
+  } else {
+    console.warn('[GOOGLE] ⚠️ Refresh failed — user may need to re-auth');
+  }
 }

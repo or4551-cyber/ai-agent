@@ -132,6 +132,7 @@ export function buildSystemPrompt(context: {
   favoritesContext?: string;
   personalityContext?: string;
   updateContext?: string;
+  sessionIntentsContext?: string;
   liveMode?: boolean;
 }): string {
   let prompt = BASE_PROMPT;
@@ -146,6 +147,11 @@ export function buildSystemPrompt(context: {
     const dayName = dayNames[now.getDay()];
     const greeting = hour < 6 ? 'לילה' : hour < 12 ? 'בוקר' : hour < 17 ? 'צהריים' : hour < 21 ? 'ערב' : 'לילה';
     prompt += `\n## הזמן עכשיו\n- יום ${dayName}, ${now.toLocaleDateString('he-IL')} ${now.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} (${greeting})\n`;
+  }
+
+  // Session intents — what user asked for in this conversation (never lose track)
+  if (context.sessionIntentsContext) {
+    prompt += context.sessionIntentsContext;
   }
 
   // User profile (learned over time)

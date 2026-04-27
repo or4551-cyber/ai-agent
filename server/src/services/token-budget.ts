@@ -232,12 +232,44 @@ export function validateToolPairing(messages: HistoryMessage[]): boolean {
 function createQuickSummary(messages: HistoryMessage[]): string {
   const parts: string[] = [];
   for (const m of messages) {
-    if (typeof m.content !== 'string') continue;
-    const text = m.content.substring(0, 100);
-    if (m.role === 'user') parts.push(`משתמש: ${text}`);
+    if (m.role === 'user') {
+      if (typeof m.content === 'string') {
+        parts.push(`משתמש: ${m.content.substring(0, 150)}`);
+      } else if (Array.isArray(m.content)) {
+        // Extract text from tool_result blocks (capture what tools returned)
+        const textParts = m.content
+          .filter((b: any) => b.type === 'text' || b.type === 'tool_result')
+          .map((b: any) => {
+            if (b.type === 'text') return b.text?.substring(0, 100);
+            if (b.type === 'tool_result') {
+              const content = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
+              return `[tool:${content.substring(0, 80)}]`;
+            }
+            return '';
+          })
+          .filter(Boolean);
+        if (textParts.length > 0) parts.push(textParts.join(' '));
+      }
+    } else if (m.role === 'assistant') {
+      if (typeof m.content === 'string') {
+        parts.push(`מרלין: ${m.content.substring(0, 150)}`);
+      } else if (Array.isArray(m.content)) {
+        // Capture which tools were called and key text
+        const toolNames = m.content
+          .filter((b: any) => b.type === 'tool_use')
+          .map((b: any) => b.name)
+          .join(', ');
+        const textBits = m.content
+          .filter((b: any) => b.type === 'text' && b.text)
+          .map((b: any) => b.text.substring(0, 100))
+          .join(' ');
+        if (toolNames) parts.push(`[tools: ${toolNames}]`);
+        if (textBits) parts.push(`מרלין: ${textBits}`);
+      }
+    }
   }
-  // Keep summary compact
-  return parts.slice(0, 5).join(' | ');
+  // Keep summary compact but meaningful
+  return parts.slice(0, 10).join(' | ');
 }
 
 function truncateMessages(messages: HistoryMessage[], maxTokens: number): HistoryMessage[] {
