@@ -74,10 +74,17 @@ export default function ChatWindow() {
   // Flush queued messages when reconnected
   useEffect(() => {
     if (connected && queueSize > 0) {
-      const flush = () => {
+      const flush = async () => {
+        // Remove old "saved in queue" placeholder bubbles
+        setMessages(prev => prev.filter(m =>
+          !(m.role === 'assistant' && m.content === '📥 ההודעה נשמרה בתור. תישלח אוטומטית כשהחיבור יחזור.')
+        ));
+        // Re-send each queued message properly (creates UI placeholders + sends via WS)
         let msg = dequeueMessage();
         while (msg) {
-          wsRef.current?.send('chat', { message: msg.message });
+          handleSend(msg.message);
+          // Small delay between messages so they don't overlap
+          await new Promise(r => setTimeout(r, 500));
           msg = dequeueMessage();
         }
         setQueueSize(0);
