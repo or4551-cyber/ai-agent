@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Heart, Footprints, Users, Brain, Activity, Search,
-  MessageCircle, Camera, Folder, Music, Map, Phone,
+  MessageCircle, Camera, Folder, Map, Phone,
   Mail, Calendar, Battery, Wifi, BellRing, Sparkles,
   ArrowRight, Mic, Sun, Moon, CloudSun, Star,
 } from 'lucide-react';
@@ -139,7 +139,7 @@ function QuickApps() {
     { icon: Phone, label: 'שיחה', color: 'from-green-500 to-emerald-600', action: () => router.push('/chat?cmd=חייג') },
     { icon: Mail, label: 'מייל', color: 'from-blue-500 to-cyan-600', action: () => router.push('/chat?cmd=תראה+מיילים+חדשים') },
     { icon: Calendar, label: 'יומן', color: 'from-orange-500 to-amber-600', action: () => router.push('/chat?cmd=מה+ביומן+היום') },
-    { icon: Music, label: 'מוזיקה', color: 'from-teal-500 to-green-600', action: () => router.push('/chat?cmd=מה+מתנגן+עכשיו') },
+    { icon: CloudSun, label: 'מזג אוויר', color: 'from-sky-500 to-cyan-600', action: () => router.push('/chat?cmd=מה+מזג+האוויר+היום') },
     { icon: Map, label: 'מיקום', color: 'from-indigo-500 to-blue-600', action: () => router.push('/chat?cmd=איפה+אני+עכשיו') },
     { icon: Folder, label: 'קבצים', color: 'from-zinc-500 to-zinc-600', action: () => router.push('/files') },
     { icon: Star, label: 'מועדפים', color: 'from-amber-500 to-yellow-600', action: () => router.push('/favorites') },

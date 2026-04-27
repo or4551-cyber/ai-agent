@@ -19,6 +19,7 @@ import { VoiceDaemon } from './services/voice-daemon';
 import { PersonalityEngine } from './services/personality-engine';
 import { RemoteBackend } from './services/remote-backend';
 import { DeviceSyncService } from './services/device-sync';
+import { TelegramBotService } from './services/telegram-bot';
 import {
   reminderService,
   routineService,
@@ -97,6 +98,9 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN || 'dev-token';
 initGoogleAuth().catch(err => console.warn('[GOOGLE] Init failed (non-fatal):', (err as Error).message));
 // Clean stale conversation sessions (older than 2 hours)
 ClaudeAgent.cleanStaleSessions();
+// Start Telegram bot (receives messages from Telegram and routes to Merlin)
+const telegramBot = new TelegramBotService();
+telegramBot.start();
 const FRONTEND_DIR = path.join(__dirname, '..', '..', 'web', 'out');
 
 // Path-traversal protection: only allow file ops inside these roots

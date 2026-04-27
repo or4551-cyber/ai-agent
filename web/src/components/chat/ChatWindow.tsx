@@ -28,6 +28,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   toolCalls?: ToolCall[];
+  timestamp?: number;
 }
 
 function getWsUrl() {
@@ -292,10 +293,12 @@ export default function ChatWindow() {
   }, [connected]);
 
   const handleSend = (message: string, images?: ImageAttachment[]) => {
+    const now = Date.now();
     const userMsg: Message = {
-      id: `user-${Date.now()}`,
+      id: `user-${now}`,
       role: 'user',
       content: images ? `📷 ${message}` : message,
+      timestamp: now,
     };
 
     const assistantId = `assistant-${Date.now()}`;
@@ -306,6 +309,7 @@ export default function ChatWindow() {
       role: 'assistant',
       content: '',
       toolCalls: [],
+      timestamp: Date.now(),
     };
 
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
@@ -608,11 +612,11 @@ export default function ChatWindow() {
               {[
                 { icon: '🔋', label: 'סוללה', msg: 'כמה סוללה נשארה?' },
                 { icon: '📅', label: 'יומן', msg: 'מה ביומן שלי היום?' },
-                { icon: '�', label: 'מיילים', msg: 'תראה לי מיילים שלא קראתי' },
-                { icon: '📸', label: 'צלם', msg: 'תצלם תמונה' },
-                { icon: '💾', label: 'אחסון', msg: 'תסרוק את האחסון' },
-                { icon: '�', label: 'מיקום', msg: 'איפה אני נמצא?' },
-                { icon: '�', label: 'התראות', msg: 'מה ההתראות האחרונות?' },
+                { icon: '📧', label: 'מיילים', msg: 'תראה לי מיילים שלא קראתי' },
+                { icon: '🌤️', label: 'מזג אוויר', msg: 'מה מזג האוויר היום?' },
+                { icon: '�', label: 'פתקים', msg: 'תראה את הפתקים שלי' },
+                { icon: '📍', label: 'מיקום', msg: 'איפה אני נמצא?' },
+                { icon: '🔔', label: 'התראות', msg: 'מה ההתראות האחרונות?' },
                 { icon: '✅', label: 'משימות', msg: 'תראה לי את המשימות שלי' },
               ].map((s, i) => (
                 <button
@@ -644,6 +648,7 @@ export default function ChatWindow() {
             content={msg.content}
             toolCalls={msg.toolCalls}
             onApprove={handleApprove}
+            timestamp={msg.timestamp}
           />
         ))}
         {typingStatus === 'thinking' && <TypingIndicator label="חושב..." />}

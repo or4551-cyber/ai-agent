@@ -698,6 +698,119 @@ async function executeToolInternal(
       return `✅ עודכן: ${updated.name}\n${JSON.stringify(updated, null, 2)}`;
     }
 
+    // ===== NEW UTILITY TOOLS =====
+    case 'weather': {
+      const loc = (input.location as string) || 'Tel Aviv';
+      const lang = (input.lang as string) || 'he';
+      try {
+        const url = `https://wttr.in/${encodeURIComponent(loc)}?format=j1&lang=${lang}`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!resp.ok) return `❌ לא הצלחתי לקבל מזג אוויר עבור "${loc}"`;
+        const data: any = await resp.json();
+        const cur = data.current_condition?.[0];
+        if (!cur) return `❌ אין נתונים עבור "${loc}"`;
+        const forecast = data.weather?.slice(0, 3).map((d: any) => {
+          const date = d.date;
+          const min = d.mintempC;
+          const max = d.maxtempC;
+          const desc = d.hourly?.[4]?.lang_he?.[0]?.value || d.hourly?.[4]?.weatherDesc?.[0]?.value || '';
+          return `${date}: ${min}°-${max}°C ${desc}`;
+        }).join('\n') || '';
+        const desc = cur.lang_he?.[0]?.value || cur.weatherDesc?.[0]?.value || '';
+        return `🌤️ מזג אוויר — ${loc}\nטמפרטורה: ${cur.temp_C}°C (מרגיש ${cur.FeelsLikeC}°C)\nמצב: ${desc}\nלחות: ${cur.humidity}%\nרוח: ${cur.windspeedKmph} קמ"ש\n\n📅 תחזית:\n${forecast}`;
+      } catch (err) {
+        return `❌ שגיאה בקבלת מזג אוויר: ${(err as Error).message}`;
+      }
+    }
+
+    case 'translate': {
+      const text = input.text as string;
+      const to = input.to as string;
+      const from = (input.from as string) || 'auto';
+      // Use MyMemory free translation API
+      try {
+        const langPair = from === 'auto' ? `auto|${to}` : `${from}|${to}`;
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.substring(0, 500))}&langpair=${langPair}`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        const data: any = await resp.json();
+        if (data.responseStatus === 200 && data.responseData?.translatedText) {
+          return `🌐 תרגום (${from} → ${to}):\n${data.responseData.translatedText}`;
+        }
+        return `❌ תרגום נכשל: ${data.responseDetails || 'Unknown error'}`;
+      } catch (err) {
+        return `❌ שגיאת תרגום: ${(err as Error).message}`;
+      }
+    }
+
+    case 'summarize_url': {
+      const url = input.url as string;
+      const maxLen = (input.max_length as number) || 500;
+      try {
+        const content = await webBrowse(url);
+        // Trim to reasonable size for summary
+        const trimmed = content.substring(0, 3000);
+        return `📄 תוכן מ-${url} (${trimmed.length} תווים):\n\n${trimmed.substring(0, maxLen * 3)}\n\n[סוף התוכן — סכם למשתמש ב-${maxLen} תווים]`;
+      } catch (err) {
+        return `❌ לא הצלחתי לגשת ל-${url}: ${(err as Error).message}`;
+      }
+    }
+
+    case 'quick_note': {
+      const notesPath = require('path').join(process.env.HOME || '.', '.ai-agent', 'notes.json');
+      const fs = require('fs');
+      const action = input.action as string;
+
+      // Load existing notes
+      let notes: { id: string; text: string; tag?: string; createdAt: string }[] = [];
+      try {
+        if (fs.existsSync(notesPath)) {
+          notes = JSON.parse(fs.readFileSync(notesPath, 'utf-8'));
+        }
+      } catch { notes = []; }
+
+      const saveNotes = () => {
+        const dir = require('path').dirname(notesPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(notesPath, JSON.stringify(notes, null, 2), 'utf-8');
+      };
+
+      switch (action) {
+        case 'add': {
+          const note = {
+            id: `note_${Date.now()}`,
+            text: input.text as string,
+            tag: (input.tag as string) || undefined,
+            createdAt: new Date().toISOString(),
+          };
+          notes.unshift(note);
+          if (notes.length > 200) notes = notes.slice(0, 200);
+          saveNotes();
+          return `📝 נשמר! (${note.id})${note.tag ? ` [${note.tag}]` : ''}\n"${note.text}"`;
+        }
+        case 'list': {
+          if (notes.length === 0) return '📝 אין פתקים שמורים.';
+          const tag = input.tag as string;
+          const filtered = tag ? notes.filter(n => n.tag === tag) : notes;
+          return `📝 ${filtered.length} פתקים:\n${filtered.slice(0, 20).map(n => `• [${n.id}]${n.tag ? ` [${n.tag}]` : ''} ${n.text.substring(0, 80)}`).join('\n')}`;
+        }
+        case 'search': {
+          const q = ((input.query as string) || '').toLowerCase();
+          const found = notes.filter(n => n.text.toLowerCase().includes(q) || n.tag?.toLowerCase().includes(q));
+          if (found.length === 0) return `🔍 לא נמצאו פתקים עבור "${q}"`;
+          return `🔍 ${found.length} תוצאות:\n${found.slice(0, 10).map(n => `• [${n.id}]${n.tag ? ` [${n.tag}]` : ''} ${n.text.substring(0, 80)}`).join('\n')}`;
+        }
+        case 'delete': {
+          const idx = notes.findIndex(n => n.id === input.id);
+          if (idx < 0) return `❌ לא נמצא פתק עם ID: ${input.id}`;
+          const removed = notes.splice(idx, 1)[0];
+          saveNotes();
+          return `🗑️ נמחק: "${removed.text.substring(0, 60)}"`;
+        }
+        default:
+          return `❌ פעולה לא ידועה: ${action}. השתמש ב: add, list, search, delete`;
+      }
+    }
+
     default: {
       // Try executing as a plugin
       const pm = getPluginManager();

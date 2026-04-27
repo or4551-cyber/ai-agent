@@ -1410,6 +1410,70 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+  // ===== NEW UTILITY TOOLS =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'weather',
+      description: 'Get current weather and forecast for a location. Uses wttr.in free API. Default location is Tel Aviv.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          location: { type: 'string', description: 'City name (e.g. "Tel Aviv", "Jerusalem", "Haifa")' },
+          lang: { type: 'string', description: 'Language for output: he (Hebrew, default), en (English)' },
+        },
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'translate',
+      description: 'Translate text between languages using LibreTranslate-compatible API or fallback. Auto-detects source language.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'Text to translate' },
+          to: { type: 'string', description: 'Target language code (e.g. "he", "en", "ar", "ru", "fr")' },
+          from: { type: 'string', description: 'Source language code (optional, auto-detected if omitted)' },
+        },
+        required: ['text', 'to'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'summarize_url',
+      description: 'Fetch a web page and return a concise summary of its content. Great for articles, news, blog posts.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'URL to fetch and summarize' },
+          max_length: { type: 'number', description: 'Max summary length in chars (default 500)' },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'quick_note',
+      description: 'Save or retrieve quick notes. Notes are saved to ~/.ai-agent/notes.json. Great for "save this for later" requests.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', description: '"add" to save a new note, "list" to show all notes, "search" to find notes, "delete" to remove a note' },
+          text: { type: 'string', description: 'Note text (for "add" action)' },
+          query: { type: 'string', description: 'Search query (for "search" action)' },
+          id: { type: 'string', description: 'Note ID (for "delete" action)' },
+          tag: { type: 'string', description: 'Optional tag/category for the note' },
+        },
+        required: ['action'],
+      },
+    },
+  },
 ];
 
 // Singleton plugin manager — lazy loaded to avoid circular deps
