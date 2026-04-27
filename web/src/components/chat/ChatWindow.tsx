@@ -138,7 +138,7 @@ export default function ChatWindow() {
     const selectedModel = typeof window !== 'undefined'
       ? localStorage.getItem('ai_model') || 'claude-sonnet-4-6'
       : 'claude-sonnet-4-6';
-    const wsUrl = `${getWsUrl()}?model=${encodeURIComponent(selectedModel)}`;
+    const wsUrl = `${getWsUrl()}?model=${encodeURIComponent(selectedModel)}&conversationId=${encodeURIComponent(conversationId)}`;
     const ws = new AgentWebSocket(wsUrl, AUTH_TOKEN);
     wsRef.current = ws;
 

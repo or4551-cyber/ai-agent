@@ -11,6 +11,20 @@ import { FavoritesService } from '../services/favorites';
 import { PersonalityEngine } from '../services/personality-engine';
 import { estimateTokens, trimHistory, trimSystemContext, validateToolPairing, stripOrphanedTools } from '../services/token-budget';
 import { agentMemory, userProfileService, favoritesService, updateAwareness } from '../services/registry';
+import fs from 'fs';
+import path from 'path';
+
+// Session persistence — save/restore active conversation state to survive restarts
+const SESSION_DIR = path.join(process.env.HOME || '.', '.ai-agent', 'sessions');
+const SESSION_MAX_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+function ensureSessionDir(): void {
+  if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
+}
+
+function sessionPath(convId: string): string {
+  return path.join(SESSION_DIR, `${convId}.json`);
+}
 
 // Patterns that indicate a simple query answerable by local LLM (no tools needed)
 const LOCAL_LLM_PATTERNS = [
@@ -615,6 +629,8 @@ export class ClaudeAgent {
 
   clearHistory(): void {
     this.conversationHistory = [];
+    this.sessionIntents = [];
+    this.deleteSession();
   }
 
   getHistory(): MessageParam[] {
@@ -630,5 +646,61 @@ export class ClaudeAgent {
       .filter(m => typeof m.content === 'string')
       .map(m => ({ role: m.role, content: m.content as string }));
     return { id: this.conversationId, messages };
+  }
+
+  // === SESSION PERSISTENCE ===
+
+  saveSession(): void {
+    try {
+      ensureSessionDir();
+      const data = {
+        conversationId: this.conversationId,
+        history: this.conversationHistory,
+        intents: this.sessionIntents,
+        model: this.model,
+        savedAt: Date.now(),
+      };
+      fs.writeFileSync(sessionPath(this.conversationId), JSON.stringify(data), 'utf-8');
+    } catch (err) {
+      console.warn('[Agent] Session save failed (non-fatal):', (err as Error).message);
+    }
+  }
+
+  restoreSession(convId: string): boolean {
+    try {
+      const filePath = sessionPath(convId);
+      if (!fs.existsSync(filePath)) return false;
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      // Don't restore stale sessions
+      if (Date.now() - data.savedAt > SESSION_MAX_AGE_MS) {
+        try { fs.unlinkSync(filePath); } catch {}
+        return false;
+      }
+      this.conversationId = data.conversationId;
+      this.conversationHistory = data.history || [];
+      this.sessionIntents = data.intents || [];
+      console.log(`[Agent] Restored session ${convId}: ${this.conversationHistory.length} messages, ${this.sessionIntents.length} intents`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private deleteSession(): void {
+    try { fs.unlinkSync(sessionPath(this.conversationId)); } catch {}
+  }
+
+  static cleanStaleSessions(): void {
+    try {
+      ensureSessionDir();
+      const files = fs.readdirSync(SESSION_DIR);
+      for (const f of files) {
+        const filePath = path.join(SESSION_DIR, f);
+        const stat = fs.statSync(filePath);
+        if (Date.now() - stat.mtimeMs > SESSION_MAX_AGE_MS) {
+          try { fs.unlinkSync(filePath); } catch {}
+        }
+      }
+    } catch {}
   }
 }

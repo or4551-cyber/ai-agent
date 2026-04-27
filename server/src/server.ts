@@ -95,6 +95,8 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN || 'dev-token';
 
 // Pre-refresh Google token on startup so it survives server restarts
 initGoogleAuth().catch(err => console.warn('[GOOGLE] Init failed (non-fatal):', (err as Error).message));
+// Clean stale conversation sessions (older than 2 hours)
+ClaudeAgent.cleanStaleSessions();
 const FRONTEND_DIR = path.join(__dirname, '..', '..', 'web', 'out');
 
 // Path-traversal protection: only allow file ops inside these roots
@@ -1653,14 +1655,27 @@ wss.on('connection', (ws: WebSocket, req) => {
     return;
   }
 
-  // Read model from query params
+  // Read model and conversationId from query params
   const selectedModel = url.searchParams.get('model') || 'claude-sonnet-4-6';
-  console.log(`[WS] Model: ${selectedModel}`);
+  const clientConvId = url.searchParams.get('conversationId') || '';
+  console.log(`[WS] Model: ${selectedModel}${clientConvId ? `, convId: ${clientConvId}` : ''}`);
 
   // Create agent for this connection — use safeSend to prevent crashes
   const agent = new ClaudeAgent(apiKey, (event: WSResponse) => {
     safeSend(ws, JSON.stringify(event));
   }, selectedModel);
+
+  // Restore session if client sent a conversationId (survives server restarts)
+  if (clientConvId) {
+    const restored = agent.restoreSession(clientConvId);
+    if (restored) {
+      safeSend(ws, JSON.stringify({
+        type: 'text_delta',
+        payload: { text: '🔄 שיחה שוחזרה — אני זוכר את מה שדיברנו.\n\n' },
+      }));
+      safeSend(ws, JSON.stringify({ type: 'message_done', payload: {} }));
+    }
+  }
 
   agents.set(connectionId, agent);
   registerAgent(connectionId);
@@ -1722,6 +1737,8 @@ wss.on('connection', (ws: WebSocket, req) => {
               });
               // Personality Engine: deep analysis (non-blocking, uses Haiku)
               personalityEngine.analyzeConversation(snap.messages).catch(() => {});
+              // Persist full session state (history + intents) to disk
+              agent.saveSession();
             }
           } catch (saveErr) {
             console.error(`[${connectionId}] Save error (non-fatal):`, (saveErr as Error).message);
