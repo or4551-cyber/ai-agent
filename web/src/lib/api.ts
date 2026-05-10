@@ -462,3 +462,71 @@ export function getExportUrl(id: string): string {
   const token = process.env.NEXT_PUBLIC_AUTH_TOKEN || 'dev-token';
   return `${getBaseUrl()}/api/conversations/${id}/export?format=txt&token=${token}`;
 }
+
+// ===== GOALS =====
+
+export interface Goal {
+  id: string;
+  description: string;
+  successCriteria?: string;
+  checkIntervalMinutes: number;
+  notifyOn: 'always' | 'change' | 'completion';
+  status: 'active' | 'paused' | 'completed' | 'failed';
+  createdAt: number;
+  lastCheckedAt?: number;
+  lastSummary?: string;
+  lastChangeAt?: number;
+  checks: number;
+  notifications: number;
+}
+
+export async function listGoals(includeCompleted = false): Promise<{ goals: Goal[] }> {
+  return apiFetch(`/api/goals?include_completed=${includeCompleted}`);
+}
+
+export async function createGoal(input: {
+  description: string;
+  success_criteria?: string;
+  check_interval_minutes?: number;
+  notify_on?: 'always' | 'change' | 'completion';
+}): Promise<{ goal: Goal }> {
+  return apiFetch('/api/goals', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export async function pauseGoal(id: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/api/goals/${encodeURIComponent(id)}/pause`, { method: 'POST' });
+}
+
+export async function resumeGoal(id: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/api/goals/${encodeURIComponent(id)}/resume`, { method: 'POST' });
+}
+
+export async function completeGoal(id: string, summary?: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/api/goals/${encodeURIComponent(id)}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ summary }),
+  });
+}
+
+export async function deleteGoal(id: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/api/goals/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// ===== AUDIT LOG =====
+
+export interface AuditEntry {
+  ts: number;
+  toolName: string;
+  dangerLevel: 'safe' | 'moderate' | 'dangerous';
+  approved: boolean;
+  durationMs: number;
+  inputPreview: string;
+  outputPreview: string;
+  outcome: 'success' | 'error';
+  errorMsg?: string;
+  conversationId?: string;
+}
+
+export async function listAudit(limit = 100): Promise<{ entries: AuditEntry[] }> {
+  return apiFetch(`/api/audit?limit=${limit}`);
+}

@@ -263,6 +263,50 @@ app.get('/api/audit', authMiddleware, (req, res) => {
   res.json({ entries: readAuditLog(limit) });
 });
 
+// ===== GOALS REST API (mirrors the goal_* tools) =====
+// Lets the /goals page list, pause, resume, complete, delete without going
+// through the chat agent. Same data lives behind both interfaces.
+app.get('/api/goals', authMiddleware, (req, res) => {
+  const includeCompleted = req.query.include_completed === 'true';
+  const goals = getGoalsService().list(includeCompleted);
+  res.json({ goals });
+});
+
+app.post('/api/goals', authMiddleware, (req, res) => {
+  const { description, success_criteria, check_interval_minutes, notify_on } = req.body || {};
+  if (!description || typeof description !== 'string') {
+    res.status(400).json({ error: 'description is required' });
+    return;
+  }
+  const goal = getGoalsService().add({
+    description,
+    successCriteria: success_criteria,
+    checkIntervalMinutes: check_interval_minutes,
+    notifyOn: notify_on,
+  });
+  res.json({ goal });
+});
+
+app.post('/api/goals/:id/pause', authMiddleware, writeLimit, (req, res) => {
+  const ok = getGoalsService().pause(String(req.params.id));
+  res.json({ ok });
+});
+
+app.post('/api/goals/:id/resume', authMiddleware, writeLimit, (req, res) => {
+  const ok = getGoalsService().resume(String(req.params.id));
+  res.json({ ok });
+});
+
+app.post('/api/goals/:id/complete', authMiddleware, writeLimit, (req, res) => {
+  const ok = getGoalsService().complete(String(req.params.id), req.body?.summary);
+  res.json({ ok });
+});
+
+app.delete('/api/goals/:id', authMiddleware, writeLimit, (req, res) => {
+  const ok = getGoalsService().delete(String(req.params.id));
+  res.json({ ok });
+});
+
 app.get('/api/tools', authMiddleware, (_req, res) => {
   const { getToolDefinitions } = require('./tools/definitions');
   res.json({ tools: getToolDefinitions() });

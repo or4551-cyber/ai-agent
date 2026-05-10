@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { MessageCircle, FolderOpen, Image, LayoutDashboard, Smartphone, Home, Menu, X, Mic } from 'lucide-react';
+import { MessageCircle, FolderOpen, Image, LayoutDashboard, Smartphone, Home, Menu, X, Mic, Compass, Shield } from 'lucide-react';
 import { getProactiveAlerts } from '@/lib/api';
 
 const NAV_ITEMS = [
@@ -11,6 +11,8 @@ const NAV_ITEMS = [
   { href: '/chat', icon: MessageCircle, label: 'צ\'אט' },
   { href: '/live', icon: Mic, label: 'Live' },
   { href: '/dashboard', icon: LayoutDashboard, label: 'דשבורד' },
+  { href: '/goals', icon: Compass, label: 'מטרות' },
+  { href: '/audit', icon: Shield, label: 'יומן' },
   { href: '/device', icon: Smartphone, label: 'שלט' },
   { href: '/files', icon: FolderOpen, label: 'קבצים' },
   { href: '/gallery', icon: Image, label: 'גלריה' },

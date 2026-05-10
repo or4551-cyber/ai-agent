@@ -7,6 +7,7 @@ import {
   MessageCircle, FolderOpen, Image, Settings, Bot, LayoutDashboard,
   HardDrive, Home, Mic, Smartphone, Tablet, Monitor, Wifi, WifiOff,
   Sparkles, ChevronLeft, ChevronRight as ChevronRightIcon, Zap,
+  Compass, Shield,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -15,6 +16,8 @@ const NAV_ITEMS = [
   { href: '/live', icon: Mic, label: 'Live' },
   { href: '/dashboard', icon: LayoutDashboard, label: 'דשבורד' },
   { href: '/mission-control', icon: Zap, label: 'מרכז בקרה' },
+  { href: '/goals', icon: Compass, label: 'מטרות' },
+  { href: '/audit', icon: Shield, label: 'יומן' },
   { href: '/files', icon: FolderOpen, label: 'קבצים' },
   { href: '/gallery', icon: Image, label: 'גלריה' },
   { href: '/storage', icon: HardDrive, label: 'אחסון' },
