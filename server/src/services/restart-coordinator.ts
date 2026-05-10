@@ -96,6 +96,7 @@ class RestartCoordinator {
   // "Merlin restarted at HH:MM (reason: X)" on first contact.
   recordRestartCompletion(wasGraceful: boolean = true): void {
     try {
+      fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
       const state = {
         completedAt: Date.now(),
         wasGraceful,
