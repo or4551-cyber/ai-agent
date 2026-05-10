@@ -125,7 +125,21 @@ export default function ChatInput({ onSend, onAbort, disabled, isStreaming, aler
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key !== 'Enter') return;
+
+    // On touch devices (phones, tablets) Shift isn't reachable on the on-screen
+    // keyboard, so Enter must always insert a newline — the user taps Send.
+    // On non-touch (desktop, with a real keyboard) Enter sends and Shift+Enter
+    // inserts a newline, matching the Discord/Slack convention.
+    const isTouch = typeof window !== 'undefined'
+      && (window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0);
+
+    if (isTouch) {
+      // Let the textarea insert a newline naturally.
+      return;
+    }
+
+    if (!e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
