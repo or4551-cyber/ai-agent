@@ -1,6 +1,7 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 
 const HOME = process.env.HOME || '/data/data/com.termux/files/home';
 const LLAMA_BIN = process.env.LLAMA_BIN || path.join(HOME, 'llama.cpp/llama-cli');
@@ -27,30 +28,32 @@ export class LocalLLM {
       throw new Error('Local LLM not available');
     }
 
-    const escaped = userMessage.replace(/["'`$\\]/g, '');
-    const promptFile = path.join(HOME, '.ai-agent', 'llm-prompt.txt');
+    // Unique per-call file to avoid concurrent-call collisions
+    const promptDir = path.join(HOME, '.ai-agent');
+    const promptFile = path.join(promptDir, `llm-prompt-${process.pid}-${crypto.randomBytes(6).toString('hex')}.txt`);
 
-    // Write prompt to temp file to avoid shell escaping issues
-    const promptContent = [SYS, '\nUser: ' + escaped, '\nAssistant:'].join('\n');
-    fs.mkdirSync(path.dirname(promptFile), { recursive: true });
+    // Raw user content goes to a file — never to a shell. No escaping needed.
+    const promptContent = [SYS, '', `User: ${userMessage}`, 'Assistant:'].join('\n');
+    fs.mkdirSync(promptDir, { recursive: true });
     fs.writeFileSync(promptFile, promptContent);
 
     try {
-      const cmd = [
+      // spawnSync with argv array — no shell interpretation, immune to injection.
+      const result = spawnSync(
         LLAMA_BIN,
-        '-m', MODEL_PATH,
-        '-f', promptFile,
-        '-n', '256',
-        '--temp', '0.7',
-        '--no-display-prompt',
-      ].join(' ');
+        ['-m', MODEL_PATH, '-f', promptFile, '-n', '256', '--temp', '0.7', '--no-display-prompt'],
+        { timeout: 60000, encoding: 'utf8', shell: false }
+      );
 
-      const output = execSync(cmd, { timeout: 60000 }).toString().trim();
-
-      if (!output) {
-        return 'LLM local: no output generated.';
+      if (result.error) {
+        throw result.error;
       }
-      return output;
+      if (result.status !== 0) {
+        throw new Error(`llama-cli exited with status ${result.status}: ${result.stderr || ''}`);
+      }
+
+      const output = (result.stdout || '').trim();
+      return output || 'LLM local: no output generated.';
     } catch (err) {
       throw new Error('Local LLM generation failed: ' + (err as Error).message);
     } finally {

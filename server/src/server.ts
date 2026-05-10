@@ -35,6 +35,8 @@ import {
   startCrashShield, getShieldHealth, registerAgent, unregisterAgent,
   touchAgent, onOOMPressure, safeExec,
 } from './services/crash-shield';
+import { restartCoordinator } from './services/restart-coordinator';
+import { readRecent as readAuditLog } from './services/audit-log';
 
 dotenv.config();
 
@@ -203,12 +205,57 @@ setInterval(() => {
 const generalLimit = makeRateLimit(120);   // 120/min for normal APIs
 const writeLimit = makeRateLimit(30);      // 30/min for write/delete APIs
 
+// ===== PER-CONNECTION WS RATE LIMIT =====
+// Same token-bucket idea, but the key is the connection itself (via WS object) — not IP —
+// so a misbehaving client can't drown the agent loop. Pings are free; chat is the expensive bucket.
+interface WsBuckets { chat: RateBucket; other: RateBucket; }
+function makeWsBucket(rate: number, now: number): RateBucket {
+  return { tokens: rate, lastRefill: now };
+}
+function consumeWsBucket(bucket: RateBucket, maxPerMinute: number): boolean {
+  const refillRate = maxPerMinute / 60000;
+  const now = Date.now();
+  const elapsed = now - bucket.lastRefill;
+  bucket.tokens = Math.min(maxPerMinute, bucket.tokens + elapsed * refillRate);
+  bucket.lastRefill = now;
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1;
+  return true;
+}
+const WS_CHAT_PER_MIN = 30;   // chat/abort/clear_history/set_live_mode — costs CPU + tokens
+const WS_OTHER_PER_MIN = 240; // ping/approval_response — cheap
+
 app.use('/api', generalLimit);
 
 // ===== REST ENDPOINTS =====
 
 app.get('/api/status', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0' });
+});
+
+// Detailed health for the UI status banner. No auth — intentionally cheap and
+// public-safe (no secrets in payload). Used by the SystemStatus component to
+// detect "supervised" mode and display restart info.
+app.get('/api/system/health', (_req, res) => {
+  const last = restartCoordinator.getLastRestart();
+  res.json({
+    status: 'ok',
+    supervised: process.env.MERLIN_SUPERVISED === '1',
+    uptimeSec: Math.floor(process.uptime()),
+    activeSessions: agents.size,
+    memory: {
+      rssMb: +(process.memoryUsage().rss / 1024 / 1024).toFixed(1),
+      heapMb: +(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(1),
+    },
+    lastRestart: last,
+    isDraining: restartCoordinator.isDraining(),
+  });
+});
+
+// Audit log feed — what dangerous/moderate things did Merlin do?
+app.get('/api/audit', authMiddleware, (req, res) => {
+  const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 500);
+  res.json({ entries: readAuditLog(limit) });
 });
 
 app.get('/api/tools', authMiddleware, (_req, res) => {
@@ -1593,10 +1640,42 @@ app.get('/api/gallery/image', (req, res, next) => {
 
 // ===== HTTP SERVER + WEBSOCKET =====
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+// handleProtocols: when client uses Sec-WebSocket-Protocol auth (['merlin.auth.v1', token]),
+// browsers require the server to echo back exactly one accepted subprotocol or the handshake fails.
+// We always echo back 'merlin.auth.v1' (never the token itself) so it doesn't end up in any logs.
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  handleProtocols: (protocols: Set<string>) => {
+    if (protocols.has('merlin.auth.v1')) return 'merlin.auth.v1';
+    return false; // no subprotocol — legacy query-param clients still work
+  },
+});
 
 // Active agents per connection
 const agents = new Map<string, ClaudeAgent>();
+
+// ===== RESTART COORDINATOR WIRING =====
+// Broadcast restart_imminent to every connected client. The web app shows
+// a banner; the WS auto-reconnect (with exponential backoff) handles the gap.
+function broadcastToAll(event: { type: string; payload: Record<string, unknown> }): void {
+  const msg = JSON.stringify(event);
+  wss.clients.forEach((client) => {
+    try { if (client.readyState === WebSocket.OPEN) client.send(msg); } catch {}
+  });
+}
+restartCoordinator.install(broadcastToAll);
+
+// Drain handler: persist all in-flight agent sessions before exit so the
+// next worker can resume each conversation exactly where it left off.
+restartCoordinator.onDrain(async () => {
+  console.log(`[Restart] Saving ${agents.size} active sessions`);
+  for (const [, agent] of agents.entries()) {
+    try { agent.saveSession(); } catch (err) {
+      console.error('[Restart] saveSession failed:', (err as Error).message);
+    }
+  }
+});
 
 // Proactive agent broadcasts to all connected clients
 proactiveAgent.setNotifyHandler((action) => {
@@ -1638,9 +1717,21 @@ wss.on('connection', (ws: WebSocket, req) => {
   // Keepalive tracking
   (ws as any).__isAlive = true;
   ws.on('pong', () => { (ws as any).__isAlive = true; });
-  // Auth check
+  // Auth check — prefer Sec-WebSocket-Protocol (not logged), fall back to query for legacy clients
   const url = new URL(req.url || '', `http://localhost:${PORT}`);
-  const token = url.searchParams.get('token');
+  const protocolHeader = (req.headers['sec-websocket-protocol'] as string | undefined) || '';
+  const protocols = protocolHeader.split(',').map(s => s.trim()).filter(Boolean);
+  // Expected format: ['merlin.auth.v1', '<token>']
+  let token: string | null = null;
+  if (protocols.length >= 2 && protocols[0] === 'merlin.auth.v1') {
+    token = protocols[1];
+  } else {
+    // Legacy: query param. Log deprecation once per connection.
+    token = url.searchParams.get('token');
+    if (token) {
+      console.warn('[WS] Deprecated: token via query string. Update client to use Sec-WebSocket-Protocol.');
+    }
+  }
   if (token !== AUTH_TOKEN) {
     ws.close(4001, 'Unauthorized');
     return;
@@ -1648,6 +1739,12 @@ wss.on('connection', (ws: WebSocket, req) => {
 
   const connectionId = uuidv4();
   console.log(`[WS] Client connected: ${connectionId}`);
+
+  // Per-connection rate-limit buckets (chat = expensive, other = cheap)
+  const buckets: WsBuckets = {
+    chat: makeWsBucket(WS_CHAT_PER_MIN, Date.now()),
+    other: makeWsBucket(WS_OTHER_PER_MIN, Date.now()),
+  };
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -1695,6 +1792,19 @@ wss.on('connection', (ws: WebSocket, req) => {
     touchAgent(connectionId);
     try {
       const msg = JSON.parse(data.toString());
+
+      // Per-connection rate limit. Chat-class messages share one bucket;
+      // ping/approval/etc share a more permissive one.
+      const isChatClass = msg.type === 'chat' || msg.type === 'abort' || msg.type === 'clear_history' || msg.type === 'set_live_mode';
+      const bucket = isChatClass ? buckets.chat : buckets.other;
+      const limit = isChatClass ? WS_CHAT_PER_MIN : WS_OTHER_PER_MIN;
+      if (!consumeWsBucket(bucket, limit)) {
+        safeSend(ws, JSON.stringify({
+          type: 'error',
+          payload: { message: 'Rate limit exceeded — האט קצת ונסה שוב.' },
+        }));
+        return;
+      }
 
       if (msg.type === 'chat') {
         const userMessage = msg.payload.message as string;
@@ -1772,7 +1882,15 @@ wss.on('connection', (ws: WebSocket, req) => {
         }
       } else if (msg.type === 'approval_response') {
         const { id, approved } = msg.payload;
-        agent.resolveApproval(id as string, approved as boolean);
+        const applied = agent.resolveApproval(id as string, approved as boolean);
+        if (!applied) {
+          // Approval came in too late (already auto-rejected on timeout) or was unknown.
+          // Tell the client so its UI can show "פג תוקף — בקש שוב" instead of hanging.
+          safeSend(ws, JSON.stringify({
+            type: 'approval_timeout',
+            payload: { id, message: '⏱️ האישור הזה כבר פג — בקש שוב.' },
+          }));
+        }
       } else if (msg.type === 'ping') {
         // Client keepalive — respond with pong and mark alive
         (ws as any).__isAlive = true;

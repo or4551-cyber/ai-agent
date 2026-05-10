@@ -23,6 +23,10 @@ import {
   backupService,
   favoritesService,
 } from '../services/registry';
+import { tryExecute as tryRegisteredTool } from './tool-registry';
+// Side-effect import: registers migrated tool handlers in the registry.
+import './tool-handlers';
+import { recordToolExecution, buildEntry } from '../services/audit-log';
 
 let globalVoiceMode: VoiceModeService | null = null;
 
@@ -141,12 +145,29 @@ const HEALING_RULES: HealingRule[] = [
 
 export async function executeTool(
   toolName: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  context?: { approved?: boolean; conversationId?: string }
 ): Promise<ExecutionResult> {
   const dangerLevel = getDangerLevel(toolName);
+  const startedAt = Date.now();
+
+  const audit = (output: string, outcome: 'success' | 'error', errorMsg?: string) => {
+    recordToolExecution(buildEntry({
+      toolName,
+      dangerLevel,
+      approved: context?.approved ?? false,
+      startedAt,
+      input,
+      output,
+      outcome,
+      errorMsg,
+      conversationId: context?.conversationId,
+    }));
+  };
 
   try {
     const output = await executeToolInternal(toolName, input);
+    audit(output, 'success');
     return { output, dangerLevel };
   } catch (err) {
     const errorMsg = (err as Error).message;
@@ -171,9 +192,10 @@ export async function executeTool(
 
           try {
             const retryOutput = await executeToolInternal(toolName, input);
-            // Remember what worked
             errorMemory.set(errorKey, { fix: fixResult, timestamp: Date.now() });
-            return { output: `[🔧 Auto-fixed: ${rule.description} — ${fixResult}]\n${retryOutput}`, dangerLevel };
+            const finalOutput = `[🔧 Auto-fixed: ${rule.description} — ${fixResult}]\n${retryOutput}`;
+            audit(finalOutput, 'success');
+            return { output: finalOutput, dangerLevel };
           } catch (retryErr) {
             console.log(`[SelfHeal] Retry after fix #${i + 1} failed: ${(retryErr as Error).message}`);
           }
@@ -184,10 +206,9 @@ export async function executeTool(
       break; // Only match one rule
     }
 
-    return {
-      output: `Error: ${errorMsg}\n\n💡 טיפ: אפשר לנסות "תתקן את עצמך" ואני אנתח את הבעיה לעומק`,
-      dangerLevel,
-    };
+    const failOutput = `Error: ${errorMsg}\n\n💡 טיפ: אפשר לנסות "תתקן את עצמך" ואני אנתח את הבעיה לעומק`;
+    audit(failOutput, 'error', errorMsg);
+    return { output: failOutput, dangerLevel };
   }
 }
 
@@ -195,6 +216,11 @@ async function executeToolInternal(
   toolName: string,
   input: Record<string, unknown>
 ): Promise<string> {
+  // Registry-first dispatch — migrated tools live in tool-handlers.ts.
+  // Anything not yet migrated falls through to the legacy switch below.
+  const registered = await tryRegisteredTool(toolName, input);
+  if (registered !== null) return registered;
+
   switch (toolName) {
     // File System
     case 'read_file':

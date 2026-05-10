@@ -39,7 +39,15 @@ export interface WSMessage {
 }
 
 export interface WSResponse {
-  type: 'text_delta' | 'tool_call_start' | 'tool_call_end' | 'message_done' | 'error' | 'approval_request';
+  type:
+    | 'text_delta'
+    | 'tool_call_start'
+    | 'tool_call_end'
+    | 'message_done'
+    | 'error'
+    | 'approval_request'
+    | 'approval_timeout'
+    | 'restart_imminent';
   payload: Record<string, unknown>;
 }
 

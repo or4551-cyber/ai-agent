@@ -39,8 +39,10 @@ export class AgentWebSocket {
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN) return;
 
-    const separator = this.url.includes('?') ? '&' : '?';
-    this.ws = new WebSocket(`${this.url}${separator}token=${this.token}`);
+    // Send token via Sec-WebSocket-Protocol so it never appears in URL/access logs.
+    // Browser WebSocket API limitation: this is the only way to send a header from a browser.
+    // Format: ['merlin.auth.v1', token]. Server's handleProtocols echoes back 'merlin.auth.v1'.
+    this.ws = new WebSocket(this.url, ['merlin.auth.v1', this.token]);
 
     this.ws.onopen = () => {
       this._connected = true;

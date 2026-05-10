@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import {
   FileText, Terminal, Image, Mail, MessageCircle,
   GitBranch, Globe, MapPin, Phone, Battery,
@@ -7,7 +8,8 @@ import {
   FolderOpen, Edit, FilePlus, Loader2, Check, X,
   CloudSun, Languages, StickyNote, LinkIcon,
   Music, Calendar, HardDrive, Bookmark, Brain,
-  Shield, Mic, Share2, Smartphone, QrCode
+  Shield, Mic, Share2, Smartphone, QrCode,
+  Activity, RefreshCw, Download, ChevronDown, ChevronUp, Clock,
 } from 'lucide-react';
 
 interface ToolCallCardProps {
@@ -15,9 +17,12 @@ interface ToolCallCardProps {
   name: string;
   input: Record<string, unknown>;
   output?: string;
-  status: 'running' | 'success' | 'error' | 'pending_approval';
+  status: 'running' | 'success' | 'error' | 'pending_approval' | 'timeout';
   onApprove?: (id: string, approved: boolean) => void;
 }
+
+// Output longer than this collapses behind a "show details" toggle.
+const OUTPUT_COLLAPSE_THRESHOLD = 280;
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   read_file: <FileText size={16} />,
@@ -62,6 +67,10 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   scan_qr_code: <QrCode size={16} />,
   media_control: <Music size={16} />,
   make_call: <Phone size={16} />,
+  system_status: <Activity size={16} />,
+  system_restart: <RefreshCw size={16} />,
+  system_update: <Download size={16} />,
+  memory_search: <Brain size={16} />,
 };
 
 function getToolLabel(name: string): string {
@@ -115,6 +124,10 @@ function getToolLabel(name: string): string {
     gcal_add: 'מוסיף אירוע',
     google_tasks_list: 'קורא משימות',
     google_tasks_add: 'מוסיף משימה',
+    system_status: 'בודק את עצמי',
+    system_restart: 'מאתחל את עצמי',
+    system_update: 'מעדכן את עצמי',
+    memory_search: 'מחפש בזיכרון',
   };
   return labels[name] || name;
 }
@@ -166,11 +179,17 @@ export default function ToolCallCard({ id, name, input, output, status, onApprov
   const label = getToolLabel(name);
   const summary = getInputSummary(name, input);
 
+  // Long outputs collapse by default — keeps the chat scannable.
+  // Errors stay open so the user can see what went wrong without an extra click.
+  const longOutput = (output?.length || 0) > OUTPUT_COLLAPSE_THRESHOLD;
+  const [expanded, setExpanded] = useState(!longOutput || status === 'error');
+
   const statusColors = {
     running: 'border-blue-500/20 bg-blue-500/5',
     success: 'border-emerald-500/20 bg-emerald-500/5',
     error: 'border-red-500/20 bg-red-500/5',
     pending_approval: 'border-amber-500/20 bg-amber-500/5',
+    timeout: 'border-zinc-500/20 bg-zinc-500/5',
   };
 
   return (
@@ -181,19 +200,35 @@ export default function ToolCallCard({ id, name, input, output, status, onApprov
         {status === 'running' && <Loader2 size={14} className="animate-spin text-blue-400" />}
         {status === 'success' && <Check size={14} className="text-green-400" />}
         {status === 'error' && <X size={14} className="text-red-400" />}
+        {status === 'timeout' && <Clock size={14} className="text-zinc-400" />}
       </div>
 
       {summary && (
-        <div className="mt-1 text-xs text-[var(--muted-foreground)] font-mono truncate">
+        <div className="mt-1 text-xs text-[var(--muted-foreground)] font-mono truncate" dir="ltr">
           {summary}
         </div>
       )}
 
       {output && (
-        <div className="mt-2 text-xs text-[var(--muted-foreground)] bg-black/20 rounded p-2 max-h-48 overflow-auto font-mono whitespace-pre-wrap">
-          {output}
-          {renderImagePreview(name, output)}
-        </div>
+        <>
+          <div
+            className={`mt-2 text-xs text-[var(--muted-foreground)] bg-black/20 rounded p-2 overflow-auto font-mono whitespace-pre-wrap ${
+              expanded ? 'max-h-96' : 'max-h-12'
+            }`}
+            dir="ltr"
+          >
+            {expanded ? output : output.slice(0, OUTPUT_COLLAPSE_THRESHOLD) + '…'}
+            {expanded && renderImagePreview(name, output)}
+          </div>
+          {longOutput && status !== 'error' && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="mt-1 flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              {expanded ? <><ChevronUp size={12} /> כווץ</> : <><ChevronDown size={12} /> הצג הכל</>}
+            </button>
+          )}
+        </>
       )}
 
       {status === 'pending_approval' && onApprove && (
@@ -202,14 +237,20 @@ export default function ToolCallCard({ id, name, input, output, status, onApprov
             onClick={() => onApprove(id, true)}
             className="flex items-center gap-1 px-3 py-1.5 rounded bg-green-600 hover:bg-green-500 text-white text-xs font-medium transition-colors"
           >
-            <Check size={14} /> Approve
+            <Check size={14} /> אשר
           </button>
           <button
             onClick={() => onApprove(id, false)}
             className="flex items-center gap-1 px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white text-xs font-medium transition-colors"
           >
-            <X size={14} /> Reject
+            <X size={14} /> דחה
           </button>
+        </div>
+      )}
+
+      {status === 'timeout' && (
+        <div className="mt-2 text-xs text-zinc-400">
+          ⏱ פג תוקף האישור — בקש מחדש כדי להפעיל.
         </div>
       )}
     </div>

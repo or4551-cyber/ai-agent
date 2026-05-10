@@ -77,7 +77,14 @@ export class ClaudeAgent {
   private model: string;
   private conversationHistory: MessageParam[] = [];
   private onEvent: (event: WSResponse) => void;
-  private pendingApprovals: Map<string, (approved: boolean) => void> = new Map();
+  // Each approval tracks its resolver, the timer that auto-rejects, and the toolName
+  // (so we can give the user a meaningful message if they approve after timeout).
+  private pendingApprovals: Map<string, {
+    resolve: (approved: boolean) => void;
+    timer: ReturnType<typeof setTimeout>;
+    toolName: string;
+    timedOut: boolean;
+  }> = new Map();
   private memory: AgentMemory;
   private userProfile: UserProfileService;
   private learner: ConversationLearner | null;
@@ -445,7 +452,11 @@ export class ClaudeAgent {
 
           let result: string;
           if (approved) {
-            const execResult = await executeTool(block.name, block.input as Record<string, unknown>);
+            const execResult = await executeTool(
+              block.name,
+              block.input as Record<string, unknown>,
+              { approved, conversationId: this.conversationId }
+            );
             result = execResult.output;
           } else {
             result = 'Action cancelled by user.';
@@ -533,7 +544,24 @@ export class ClaudeAgent {
     input: Record<string, unknown>
   ): Promise<boolean> {
     return new Promise((resolve) => {
-      this.pendingApprovals.set(toolId, resolve);
+      // Auto-reject after 60s and notify the client so its UI can update
+      // (e.g. show "פג תוקף" instead of leaving the approve button live forever).
+      const timer = setTimeout(() => {
+        const entry = this.pendingApprovals.get(toolId);
+        if (entry) {
+          entry.timedOut = true;
+          this.pendingApprovals.delete(toolId);
+          try {
+            this.onEvent({
+              type: 'approval_timeout',
+              payload: { id: toolId, toolName, message: `⏱️ פג תוקף האישור עבור: ${toolName}` },
+            });
+          } catch {}
+          resolve(false);
+        }
+      }, 60000);
+
+      this.pendingApprovals.set(toolId, { resolve, timer, toolName, timedOut: false });
 
       this.onEvent({
         type: 'approval_request',
@@ -542,16 +570,9 @@ export class ClaudeAgent {
           toolName,
           input,
           message: `⚠️ Action requires approval: ${toolName}`,
+          timeoutMs: 60000,
         },
       });
-
-      // Auto-reject after 60 seconds
-      setTimeout(() => {
-        if (this.pendingApprovals.has(toolId)) {
-          this.pendingApprovals.delete(toolId);
-          resolve(false);
-        }
-      }, 60000);
     });
   }
 
@@ -606,19 +627,28 @@ export class ClaudeAgent {
     });
   }
 
-  resolveApproval(toolId: string, approved: boolean): void {
-    const resolver = this.pendingApprovals.get(toolId);
-    if (resolver) {
+  // Returns whether the approval was applied. If false, the request had already
+  // timed out — caller (server.ts) should tell the client so the UI can react
+  // ("פג תוקף — בקש שוב").
+  resolveApproval(toolId: string, approved: boolean): boolean {
+    const entry = this.pendingApprovals.get(toolId);
+    if (!entry) return false;
+    if (entry.timedOut) {
       this.pendingApprovals.delete(toolId);
-      resolver(approved);
+      return false;
     }
+    clearTimeout(entry.timer);
+    this.pendingApprovals.delete(toolId);
+    entry.resolve(approved);
+    return true;
   }
 
   // Called when client disconnects — auto-reject all pending approvals so the
   // agent loop unblocks and frees resources.
   cleanup(): void {
-    for (const [toolId, resolver] of this.pendingApprovals.entries()) {
-      try { resolver(false); } catch {}
+    for (const [toolId, entry] of this.pendingApprovals.entries()) {
+      try { clearTimeout(entry.timer); } catch {}
+      try { entry.resolve(false); } catch {}
       this.pendingApprovals.delete(toolId);
     }
   }

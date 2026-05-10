@@ -56,12 +56,13 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
     dangerLevel: 'dangerous',
     definition: {
       name: 'delete_file',
-      description: 'Delete a file or directory. Use with caution!',
+      description: 'Delete a file or directory. Use with caution! Pass dry_run=true to preview what would be deleted (size, file count) without actually deleting.',
       input_schema: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Absolute path to the file or directory to delete' },
           recursive: { type: 'boolean', description: 'If true, delete directories recursively' },
+          dry_run: { type: 'boolean', description: 'If true, return preview without deleting. Useful when uncertain — call with dry_run first, then call again without it to commit.' },
         },
         required: ['path'],
       },
@@ -103,13 +104,14 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
     dangerLevel: 'dangerous',
     definition: {
       name: 'run_command',
-      description: 'Run a shell command in bash and return the output. Can run any command: npm, git, python, etc.',
+      description: 'Run a shell command in bash and return the output. Can run any command: npm, git, python, etc. Pass dry_run=true to show the command without executing it.',
       input_schema: {
         type: 'object',
         properties: {
           command: { type: 'string', description: 'The shell command to execute' },
           cwd: { type: 'string', description: 'Working directory for the command (optional)' },
           timeout: { type: 'number', description: 'Timeout in milliseconds (default: 30000)' },
+          dry_run: { type: 'boolean', description: 'If true, return what would run instead of running it. Useful for previewing destructive commands.' },
         },
         required: ['command'],
       },
@@ -240,7 +242,7 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
     dangerLevel: 'dangerous',
     definition: {
       name: 'send_email',
-      description: 'Send an email via SMTP.',
+      description: 'Send an email via SMTP. Pass dry_run=true to preview the email without sending.',
       input_schema: {
         type: 'object',
         properties: {
@@ -248,6 +250,7 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
           subject: { type: 'string', description: 'Email subject' },
           body: { type: 'string', description: 'Email body (plain text or HTML)' },
           html: { type: 'boolean', description: 'If true, body is treated as HTML' },
+          dry_run: { type: 'boolean', description: 'If true, show preview without sending.' },
         },
         required: ['to', 'subject', 'body'],
       },
@@ -257,12 +260,13 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
     dangerLevel: 'dangerous',
     definition: {
       name: 'send_telegram',
-      description: 'Send a message via Telegram bot.',
+      description: 'Send a message via Telegram bot. Pass dry_run=true to preview without sending.',
       input_schema: {
         type: 'object',
         properties: {
           message: { type: 'string', description: 'Message text' },
           chat_id: { type: 'string', description: 'Telegram chat ID (optional, uses default from env)' },
+          dry_run: { type: 'boolean', description: 'If true, show preview without sending.' },
         },
         required: ['message'],
       },
@@ -1471,6 +1475,63 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
           tag: { type: 'string', description: 'Optional tag/category for the note' },
         },
         required: ['action'],
+      },
+    },
+  },
+
+  // ===== SELF-MAINTENANCE / META =====
+  // These tools let Merlin maintain itself: report health, update its own code,
+  // restart cleanly. They only function when running under the supervisor (npm run start:supervised).
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'system_status',
+      description: 'Report current Merlin health: version, uptime, memory, active conversations, last restart. Use this when the user asks "are you ok?", "מה המצב שלך?", "כמה זמן אתה רץ?", or before/after self-update.',
+      input_schema: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    dangerLevel: 'dangerous',
+    definition: {
+      name: 'system_restart',
+      description: 'Schedule a graceful restart of Merlin (no code update). Active conversations are saved and resumed automatically. Use only when the user explicitly asks to restart, or when an internal error makes it necessary.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', description: 'Why the restart is needed (shown to the user)' },
+        },
+        required: ['reason'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'dangerous',
+    definition: {
+      name: 'system_update',
+      description: 'Pull the latest Merlin code from git, run npm install, and restart gracefully. Sessions and memory persist. Only call this when the user explicitly asks Merlin to update itself.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          reason: { type: 'string', description: 'Why update now (e.g. "user requested latest fixes")' },
+        },
+        required: ['reason'],
+      },
+    },
+  },
+
+  // ===== MEMORY SEARCH =====
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'memory_search',
+      description: 'Semantic-style search across all of Merlin\'s long-term memory: conversation history, episodic memories, key-value memories, and quick notes. Use this when the user asks about something said or done in the past ("מה אמרתי לך על X?", "תזכיר לי את ההמלצה שנתת לי").',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Free-text search query in any language' },
+          limit: { type: 'number', description: 'Max results to return (default 5)' },
+        },
+        required: ['query'],
       },
     },
   },

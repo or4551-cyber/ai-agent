@@ -5,8 +5,10 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "dev:supervised": "node supervisor.js",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "start:supervised": "node supervisor.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

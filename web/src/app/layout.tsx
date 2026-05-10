@@ -5,6 +5,7 @@ import Sidebar from "@/components/common/Sidebar";
 import BottomNav from "@/components/common/BottomNav";
 import Providers from "@/components/common/Providers";
 import ServiceWorkerRegistration from "@/components/common/ServiceWorkerRegistration";
+import SystemStatusBanner from "@/components/common/SystemStatusBanner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,7 +30,7 @@ export default function RootLayout({
   return (
     <html
       lang="he"
-      dir="auto"
+      dir="rtl"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <head>
@@ -43,7 +44,10 @@ export default function RootLayout({
         <Providers>
           <ServiceWorkerRegistration />
           <Sidebar />
-          <main className="flex-1 flex flex-col min-h-0">{children}</main>
+          <main className="flex-1 flex flex-col min-h-0">
+            <SystemStatusBanner />
+            {children}
+          </main>
           <BottomNav />
         </Providers>
       </body>

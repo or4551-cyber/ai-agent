@@ -1,17 +1,17 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import CodeBlock from './CodeBlock';
 import ToolCallCard from './ToolCallCard';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Copy, Check } from 'lucide-react';
 
 interface ToolCall {
   id: string;
   name: string;
   input: Record<string, unknown>;
   output?: string;
-  status: 'running' | 'success' | 'error' | 'pending_approval';
+  status: 'running' | 'success' | 'error' | 'pending_approval' | 'timeout';
 }
 
 interface MessageBubbleProps {
@@ -30,6 +30,18 @@ function formatTime(ts?: number): string {
 
 export default function MessageBubble({ role, content, toolCalls, onApprove, timestamp }: MessageBubbleProps) {
   const isUser = role === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!content) return;
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Older WebView fallback — silently no-op rather than crashing.
+    }
+  };
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 animate-fade-in group`}>
@@ -130,12 +142,27 @@ export default function MessageBubble({ role, content, toolCalls, onApprove, tim
           )}
         </div>
 
-        {/* Timestamp */}
-        {timestamp && (
-          <span className={`text-[10px] text-zinc-600 mt-1 ${isUser ? 'text-left' : 'text-right'} opacity-0 group-hover:opacity-100 transition-opacity`}>
-            {formatTime(timestamp)}
-          </span>
-        )}
+        {/* Action row: timestamp + copy. Hidden by default, shows on hover/focus. */}
+        <div className={`flex items-center gap-2 mt-1 ${isUser ? 'justify-start' : 'justify-end'} opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity`}>
+          {timestamp && (
+            <span className="text-[10px] text-zinc-600">
+              {formatTime(timestamp)}
+            </span>
+          )}
+          {content && (
+            <button
+              onClick={handleCopy}
+              aria-label="העתק הודעה"
+              className="text-[10px] text-zinc-500 hover:text-zinc-200 flex items-center gap-1 transition-colors"
+            >
+              {copied ? (
+                <><Check size={11} /> הועתק</>
+              ) : (
+                <><Copy size={11} /> העתק</>
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

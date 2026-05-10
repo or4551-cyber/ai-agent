@@ -20,7 +20,7 @@ interface ToolCall {
   name: string;
   input: Record<string, unknown>;
   output?: string;
-  status: 'running' | 'success' | 'error' | 'pending_approval';
+  status: 'running' | 'success' | 'error' | 'pending_approval' | 'timeout';
 }
 
 interface Message {
@@ -258,6 +258,37 @@ export default function ChatWindow() {
       });
       setIsStreaming(false);
       setTypingStatus('idle');
+    });
+
+    // Approval timeout — server auto-rejected because user never responded.
+    // Mark the matching tool card as 'timeout' so UI shows the right message.
+    ws.on('approval_timeout' as any, (event: WSEvent) => {
+      const { id } = event.payload;
+      setMessages((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        if (last && last.id === currentAssistantId.current && last.toolCalls) {
+          const tc = last.toolCalls.find((t) => t.id === id);
+          if (tc && tc.status === 'pending_approval') tc.status = 'timeout';
+        }
+        return updated;
+      });
+    });
+
+    // Restart announcement — server is about to drain and exit. The reconnect
+    // logic already handles getting us back; we just append a non-intrusive
+    // system note so the user knows their conversation is safe.
+    ws.on('restart_imminent' as any, (event: WSEvent) => {
+      const reason = (event.payload.reason as string) || 'restart';
+      setMessages((prev) => {
+        const updated = [...prev];
+        const last = updated[updated.length - 1];
+        const note = `\n\n🔄 *מרלין מתעדכן (${reason}). השיחה נשמרת ותחזור אוטומטית.*`;
+        if (last && last.id === currentAssistantId.current) {
+          last.content += note;
+        }
+        return updated;
+      });
     });
 
     ws.connect();
