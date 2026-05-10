@@ -1,3 +1,5 @@
+// Mirror of server-side WSResponse.type (server/src/types/index.ts).
+// When adding a new event, update both sides.
 export type WSEventType =
   | 'text_delta'
   | 'tool_call_start'
@@ -5,6 +7,13 @@ export type WSEventType =
   | 'message_done'
   | 'error'
   | 'approval_request'
+  | 'approval_timeout'
+  | 'restart_imminent'
+  | 'usage_update'
+  | 'pong'
+  | 'voice_daemon'
+  | 'voice_daemon_agent'
+  | 'proactive_action'
   | 'connection';
 
 export interface WSEvent {

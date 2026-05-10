@@ -75,15 +75,22 @@ export class ConversationHistoryService {
 
       // Update index
       const preview = this.extractPreview(conversation.messages);
-      const existing = this.index.findIndex(c => c.id === conversation.id);
+      const existingIdx = this.index.findIndex(c => c.id === conversation.id);
+      // Preserve the original createdAt across saves. Callers tend to pass
+      // Date.now() blindly on every auto-save, which would otherwise overwrite
+      // creation time with the latest update time — making "old chats" sort
+      // identical to "recent chats" by createdAt.
+      const previousCreatedAt =
+        existingIdx >= 0 ? this.index[existingIdx].createdAt : undefined;
       const entry: ConversationIndex = {
         id: conversation.id,
         title: conversation.title || this.generateTitle(conversation.messages),
         preview,
         messageCount: conversation.messages.length,
-        createdAt: conversation.createdAt,
+        createdAt: previousCreatedAt ?? conversation.createdAt ?? Date.now(),
         updatedAt: Date.now(),
       };
+      const existing = existingIdx;
 
       if (existing >= 0) {
         this.index[existing] = entry;

@@ -1965,10 +1965,10 @@ wss.on('connection', (ws: WebSocket, req) => {
         }
       } else if (msg.type === 'approval_response') {
         const { id, approved } = msg.payload;
-        const applied = agent.resolveApproval(id as string, approved as boolean);
-        if (!applied) {
-          // Approval came in too late (already auto-rejected on timeout) or was unknown.
-          // Tell the client so its UI can show "פג תוקף — בקש שוב" instead of hanging.
+        const result = agent.resolveApproval(id as string, approved as boolean);
+        // 'timeout' = client was already told via the auto-emit; don't double-emit.
+        // 'unknown' = stale UI / typo; tell the client so it can clear the spinner.
+        if (result === 'unknown') {
           safeSend(ws, JSON.stringify({
             type: 'approval_timeout',
             payload: { id, message: '⏱️ האישור הזה כבר פג — בקש שוב.' },

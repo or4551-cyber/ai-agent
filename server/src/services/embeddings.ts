@@ -39,7 +39,7 @@ export class EmbeddingsClient {
   }
 
   // Batch embed — much cheaper per item. Returns array aligned with input.
-  // Items that fail return zero-vectors (won't match anything but won't crash).
+  // Items that fail return null (won't match anything but won't crash).
   async embedBatch(texts: string[], opts: EmbedOptions = {}): Promise<(number[] | null)[]> {
     if (!this.apiKey || texts.length === 0) return texts.map(() => null);
 
@@ -63,6 +63,14 @@ export class EmbeddingsClient {
         console.error('[Embeddings] Batch failed (non-fatal):', (err as Error).message);
         for (let j = 0; j < chunk.length; j++) results.push(null);
       }
+    }
+
+    // Surface auth/quota/network failures clearly. Without this, an invalid
+    // key just silently produces zero indexed items — looks like "indexing
+    // didn't find anything" rather than "your key is wrong".
+    const successCount = results.filter((r) => r !== null).length;
+    if (texts.length > 0 && successCount === 0) {
+      console.warn(`[Embeddings] All ${texts.length} embeddings failed. Likely an invalid VOYAGE_API_KEY or network issue.`);
     }
     return results;
   }

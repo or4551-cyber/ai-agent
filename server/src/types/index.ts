@@ -38,6 +38,9 @@ export interface WSMessage {
   payload: Record<string, unknown>;
 }
 
+// Every WS frame the server emits. Keep this in sync with the client-side
+// WSEventType in web/src/lib/websocket.ts — when they drift, listeners
+// silently miss events.
 export interface WSResponse {
   type:
     | 'text_delta'
@@ -47,7 +50,13 @@ export interface WSResponse {
     | 'error'
     | 'approval_request'
     | 'approval_timeout'
-    | 'restart_imminent';
+    | 'restart_imminent'
+    | 'usage_update'
+    | 'pong'
+    | 'voice_daemon'
+    | 'voice_daemon_agent'
+    | 'proactive_action'
+    | 'connection';
   payload: Record<string, unknown>;
 }
 

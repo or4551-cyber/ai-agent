@@ -572,6 +572,10 @@ export class ClaudeAgent {
         if (entry) {
           entry.timedOut = true;
           this.pendingApprovals.delete(toolId);
+          // Remember briefly so a late approval_response from the client
+          // doesn't trigger a duplicate approval_timeout emit.
+          this.recentlyTimedOut.add(toolId);
+          setTimeout(() => this.recentlyTimedOut.delete(toolId), 5 * 60 * 1000).unref?.();
           try {
             this.onEvent({
               type: 'approval_timeout',
@@ -650,20 +654,29 @@ export class ClaudeAgent {
     });
   }
 
-  // Returns whether the approval was applied. If false, the request had already
-  // timed out — caller (server.ts) should tell the client so the UI can react
-  // ("פג תוקף — בקש שוב").
-  resolveApproval(toolId: string, approved: boolean): boolean {
+  // Tracks toolIds that the timer auto-rejected. We keep them around briefly
+  // so resolveApproval can distinguish "user clicked Approve too late on this
+  // exact tool" from "unknown id". The former: client already got a timeout
+  // event — don't emit another. The latter: actually unknown.
+  private recentlyTimedOut: Set<string> = new Set();
+
+  // Returns the result of the approval attempt:
+  //   'applied'  — the user's choice was honored
+  //   'timeout'  — request had already auto-rejected; client was already told
+  //   'unknown'  — never seen this id (typo or stale UI); client should be told
+  resolveApproval(toolId: string, approved: boolean): 'applied' | 'timeout' | 'unknown' {
     const entry = this.pendingApprovals.get(toolId);
-    if (!entry) return false;
+    if (!entry) {
+      return this.recentlyTimedOut.has(toolId) ? 'timeout' : 'unknown';
+    }
     if (entry.timedOut) {
       this.pendingApprovals.delete(toolId);
-      return false;
+      return 'timeout';
     }
     clearTimeout(entry.timer);
     this.pendingApprovals.delete(toolId);
     entry.resolve(approved);
-    return true;
+    return 'applied';
   }
 
   // Called when client disconnects — auto-reject all pending approvals so the

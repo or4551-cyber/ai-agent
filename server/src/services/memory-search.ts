@@ -120,6 +120,8 @@ export async function searchAsync(query: string, limit = 5): Promise<MemoryHit[]
   }
 
   // Merge: dedupe by ref, sum scores when both keyword and vector hit the same item.
+  // Iterate keyword hits FIRST so their excerpts (which include surrounding
+  // context around the match) win over vector excerpts (just text.slice(0,180)).
   const merged = new Map<string, MemoryHit>();
   const keyOf = (h: MemoryHit) => `${h.source}:${h.ref || h.title}`;
   for (const h of [...keywordHits, ...vectorHits]) {
@@ -127,7 +129,8 @@ export async function searchAsync(query: string, limit = 5): Promise<MemoryHit[]
     const existing = merged.get(k);
     if (existing) {
       existing.score += h.score;
-      if (!existing.excerpt && h.excerpt) existing.excerpt = h.excerpt;
+      // Don't replace a keyword excerpt with a vector one — the keyword
+      // excerpt already has match context built in.
     } else {
       merged.set(k, { ...h });
     }

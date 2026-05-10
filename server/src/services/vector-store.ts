@@ -60,14 +60,17 @@ export class VectorStore {
   }
 
   // Debounced write — multiple upserts in quick succession share one disk write.
-  private scheduleFlush(): void {
+  private scheduleFlush(delayMs = 1500): void {
     this.dirty = true;
     if (this.flushTimer) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
       this.flush();
-    }, 1500);
+    }, delayMs);
   }
+
+  private flushBackoffMs = 1500;
+  private readonly maxFlushBackoffMs = 60_000;
 
   private flush(): void {
     if (!this.dirty) return;
@@ -78,8 +81,15 @@ export class VectorStore {
       fs.writeFileSync(tmp, JSON.stringify(payload));
       fs.renameSync(tmp, STORE_FILE); // atomic on POSIX
       this.dirty = false;
+      this.flushBackoffMs = 1500; // reset on success
     } catch (err) {
-      console.error('[VectorStore] Flush failed:', (err as Error).message);
+      console.error('[VectorStore] Flush failed (will retry):', (err as Error).message);
+      // Re-schedule with exponential backoff. Without this, a transient
+      // ENOSPC/EBUSY would leave dirty=true but no timer queued — data
+      // sits in memory until the next upsert, losing recent indexing if
+      // the process exits first.
+      this.flushBackoffMs = Math.min(this.flushBackoffMs * 2, this.maxFlushBackoffMs);
+      this.scheduleFlush(this.flushBackoffMs);
     }
   }
 
