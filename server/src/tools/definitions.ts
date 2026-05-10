@@ -1641,6 +1641,38 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
       },
     },
   },
+
+  // ===== SUB-AGENTS (parallel investigation) =====
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'subagent_run',
+      description: 'Spawn a focused sub-agent (Claude Haiku) for a single research/analysis task. Sub-agents have READ-ONLY tools (web_search, web_browse, read_file, memory_search, etc.) — they cannot modify state. Use when a task benefits from focused investigation: deep research on one topic, summarizing one long document, cross-checking one claim. For multiple parallel investigations, prefer subagent_run_parallel.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          task: { type: 'string', description: 'The exact task. Be specific — sub-agents work best with clear scope.' },
+          max_iterations: { type: 'number', description: 'Max tool-call iterations before forcing a conclusion (default 5, max 10).' },
+        },
+        required: ['task'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'subagent_run_parallel',
+      description: 'Spawn multiple sub-agents IN PARALLEL and return all results. Use this when you have N independent investigations: comparing 3 products, summarizing 5 documents, fact-checking against 4 sources. Up to 5 tasks at once. Each sub-agent is read-only.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          tasks: { type: 'array', items: { type: 'string' }, description: 'Array of task strings (max 5). Each runs as its own sub-agent in parallel.' },
+          max_iterations_each: { type: 'number', description: 'Max iterations per sub-agent (default 5).' },
+        },
+        required: ['tasks'],
+      },
+    },
+  },
 ];
 
 // Singleton plugin manager — lazy loaded to avoid circular deps

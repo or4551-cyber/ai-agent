@@ -18,6 +18,7 @@ import {
 import { searchAsText as memorySearchText, reindexAll as memoryReindex } from '../services/memory-search';
 import { embeddings } from '../services/embeddings';
 import { vectorStore } from '../services/vector-store';
+import { runSubAgent, runSubAgentsParallel, formatSubAgentResult } from '../services/sub-agent';
 import { systemStatus, systemRestart, systemUpdate } from '../tools/system-tools';
 import { registerTools } from './tool-registry';
 import { isDryRun, dryRunDelete, dryRunCommand, dryRunSend } from './dry-run';
@@ -213,6 +214,37 @@ registerTools({
 
   goal_delete: (i) =>
     getGoalsService().delete(i.id as string) ? '🗑 המטרה נמחקה.' : 'מטרה לא נמצאה.',
+
+  // ===== Sub-agents =====
+  subagent_run: async (i) => {
+    const apiKey = process.env.ANTHROPIC_API_KEY || '';
+    if (!apiKey) return '❌ סוכן משנה דורש ANTHROPIC_API_KEY מוגדר.';
+    const r = await runSubAgent({
+      task: i.task as string,
+      apiKey,
+      maxIterations: i.max_iterations as number | undefined,
+    });
+    return formatSubAgentResult(r);
+  },
+
+  subagent_run_parallel: async (i) => {
+    const apiKey = process.env.ANTHROPIC_API_KEY || '';
+    if (!apiKey) return '❌ סוכני משנה דורשים ANTHROPIC_API_KEY מוגדר.';
+    const tasks = i.tasks as string[];
+    if (!Array.isArray(tasks) || tasks.length === 0) return '❌ tasks חייב להיות מערך לא ריק.';
+    if (tasks.length > 5) return '❌ מקסימום 5 סוכני משנה במקביל.';
+    try {
+      const results = await runSubAgentsParallel(tasks, apiKey, i.max_iterations_each as number | undefined);
+      const summary = `🤖 ${results.length} סוכני משנה הסתיימו (${results.filter((r) => r.errored).length} שגיאות)`;
+      const sections = results.map((r, idx) => {
+        const label = `### #${idx + 1} — ${r.task.slice(0, 80)}${r.task.length > 80 ? '…' : ''}`;
+        return `${label}\n${formatSubAgentResult(r)}`;
+      });
+      return `${summary}\n\n${sections.join('\n\n---\n\n')}`;
+    } catch (err) {
+      return `❌ ${(err as Error).message}`;
+    }
+  },
 
   // ===== Self-maintenance =====
   system_status: () => systemStatus(),
