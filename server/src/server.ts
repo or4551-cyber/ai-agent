@@ -2096,23 +2096,45 @@ function isPortFree(port: number): Promise<boolean> {
   });
 }
 
+function printBanner(): void {
+  console.log('');
+  console.log('╔════════════════════════════════════════╗');
+  console.log('║       🤖 AI Agent Server Running       ║');
+  console.log('╠════════════════════════════════════════╣');
+  console.log(`║  HTTP: http://localhost:${PORT}           ║`);
+  console.log(`║  WS:   ws://localhost:${PORT}/ws          ║`);
+  console.log('║                                        ║');
+  console.log('║  Open Chrome on your phone:            ║');
+  console.log(`║  http://localhost:${PORT}                  ║`);
+  console.log('╚════════════════════════════════════════╝');
+  console.log('');
+}
+
 async function startWithRetry(): Promise<void> {
+  // When running under the supervisor, lifecycle is owned by it. We must NOT
+  // run killPortHolder — its "kill any node process matching server" sweep
+  // will murder sibling workers that are still in TIME_WAIT, causing a
+  // crash-restart loop. Instead try once; on failure exit cleanly so the
+  // supervisor's exponential-backoff respawn handles it.
+  if (process.env.MERLIN_SUPERVISED === '1') {
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      console.error(`[Server] Failed to bind port ${PORT}: ${err.message}. Exiting; supervisor will retry.`);
+      process.exit(1);
+    });
+    server.listen(PORT, '0.0.0.0', () => {
+      writePidFile();
+      printBanner();
+    });
+    return;
+  }
+
+  // Standalone mode: try to evict whoever holds the port (legacy behavior).
   for (let attempt = 1; attempt <= 5; attempt++) {
     const free = await isPortFree(PORT);
     if (free) {
       server.listen(PORT, '0.0.0.0', () => {
         writePidFile();
-        console.log('');
-        console.log('╔════════════════════════════════════════╗');
-        console.log('║       🤖 AI Agent Server Running       ║');
-        console.log('╠════════════════════════════════════════╣');
-        console.log(`║  HTTP: http://localhost:${PORT}           ║`);
-        console.log(`║  WS:   ws://localhost:${PORT}/ws          ║`);
-        console.log('║                                        ║');
-        console.log('║  Open Chrome on your phone:            ║');
-        console.log(`║  http://localhost:${PORT}                  ║`);
-        console.log('╚════════════════════════════════════════╝');
-        console.log('');
+        printBanner();
       });
       return;
     }
