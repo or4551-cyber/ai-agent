@@ -114,6 +114,11 @@ export class ClaudeAgent {
   private personality: PersonalityEngine;
   private liveMode = false;
   private planMode = false;
+  // Held while a streaming SDK call is in flight, so abort()/cleanup() can
+  // stop further token spend immediately when the user clicks Stop or the
+  // WS disconnects.
+  private currentStream: { abort: () => void } | null = null;
+  private aborted = false;
   private failedWithSonnet = false; // escalation flag
 
   constructor(
@@ -204,6 +209,9 @@ export class ClaudeAgent {
     userMessage: string,
     images?: { base64: string; mediaType: string }[]
   ): Promise<string> {
+    // Fresh turn — clear any prior abort flag from a previous stopped message.
+    this.aborted = false;
+
     // Try local LLM for simple queries (saves API cost, works offline)
     if (this.canUseLocalLLM(userMessage, images)) {
       return this.processLocal(userMessage);
@@ -326,6 +334,11 @@ export class ClaudeAgent {
             );
           }
 
+          if (this.aborted) {
+            // User pressed Stop (or disconnected) before this iteration even
+            // started. Bail out cleanly without burning a request.
+            throw new Error('aborted');
+          }
           const stream = this.client.messages.stream({
             model,
             max_tokens: maxTokens,
@@ -333,6 +346,7 @@ export class ClaudeAgent {
             ...(toolsForRequest ? { tools: toolsForRequest } : {}),
             messages: this.conversationHistory as Anthropic.MessageParam[],
           });
+          this.currentStream = stream;
 
           stream.on('text', (text) => {
             finalText += text;
@@ -340,6 +354,7 @@ export class ClaudeAgent {
           });
 
           response = await stream.finalMessage();
+          this.currentStream = null;
           const elapsedMs = Date.now() - requestStartMs;
           console.log(`[Agent] ← ${model} response in ${elapsedMs}ms (stop=${response.stop_reason})`);
           lastError = null;
@@ -652,13 +667,36 @@ export class ClaudeAgent {
   }
 
   // Called when client disconnects — auto-reject all pending approvals so the
-  // agent loop unblocks and frees resources.
+  // agent loop unblocks and frees resources, AND abort any in-flight stream
+  // so we stop billing for tokens nobody will read.
   cleanup(): void {
+    this.abort('cleanup');
     for (const [toolId, entry] of this.pendingApprovals.entries()) {
       try { clearTimeout(entry.timer); } catch {}
       try { entry.resolve(false); } catch {}
       this.pendingApprovals.delete(toolId);
     }
+  }
+
+  // Public abort — invoked from server.ts when the user sends a 'abort' WS
+  // message (Stop button) OR from cleanup() on disconnect. Idempotent.
+  abort(reason: string = 'user_abort'): void {
+    if (this.aborted) return;
+    this.aborted = true;
+    if (this.currentStream) {
+      try { this.currentStream.abort(); } catch {}
+      this.currentStream = null;
+    }
+    // Tell the client the turn is over so it can re-enable input.
+    try {
+      this.onEvent({ type: 'message_done', payload: { aborted: true, reason } });
+    } catch {}
+  }
+
+  // Called at the start of each new user turn so abort() doesn't permanently
+  // poison the agent.
+  resetAbort(): void {
+    this.aborted = false;
   }
 
   setLiveMode(live: boolean): void {

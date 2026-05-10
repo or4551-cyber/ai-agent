@@ -113,10 +113,18 @@ export class GoalsService {
 
   start(): void {
     if (this.timer) return;
+    if (!this.apiKey) {
+      // Without an API key the checker can't call Anthropic. Don't burn CPU
+      // ticking forever and emitting silent 401s — start in a paused state.
+      console.warn('[Goals] No ANTHROPIC_API_KEY — checker loop NOT started. CRUD still works.');
+      return;
+    }
     // Run once shortly after boot, then every minute. Goals with longer
     // intervals are skipped on each tick if not due — cheap.
     this.timer = setInterval(() => this.tick().catch(() => {}), 60_000);
-    setTimeout(() => this.tick().catch(() => {}), 30_000).unref?.();
+    this.timer.unref?.();
+    const warm = setTimeout(() => this.tick().catch(() => {}), 30_000);
+    warm.unref?.();
     console.log('[Goals] Started (check loop: 60s tick, per-goal interval respected)');
   }
 
@@ -133,12 +141,20 @@ export class GoalsService {
     checkIntervalMinutes?: number;
     notifyOn?: NotifyPolicy;
   }): Goal {
+    // Default: check daily. Below 30min isn't useful (and burns tokens).
+    // Reject NaN, Infinity, negative values by falling back to default —
+    // otherwise the checker comparison `now - lastCheckedAt >= NaN` is always
+    // false and the goal would never fire.
+    const requested = input.checkIntervalMinutes;
+    const interval = (typeof requested === 'number' && Number.isFinite(requested) && requested > 0)
+      ? Math.max(Math.floor(requested), 30)
+      : 1440;
+
     const goal: Goal = {
       id: `goal-${Date.now()}-${uuidv4().slice(0, 6)}`,
       description: input.description,
       successCriteria: input.successCriteria,
-      // Default: check daily. Below 30min isn't useful for most goals (and burns tokens).
-      checkIntervalMinutes: Math.max(input.checkIntervalMinutes ?? 1440, 30),
+      checkIntervalMinutes: interval,
       notifyOn: input.notifyOn ?? 'change',
       status: 'active',
       createdAt: Date.now(),
@@ -221,6 +237,14 @@ export class GoalsService {
   }
 
   private async checkGoal(goal: Goal): Promise<void> {
+    // ALWAYS stamp lastCheckedAt + checks++ at the start. If the call
+    // (or the JSON parse) crashes, we don't want to retry on the next 60s
+    // tick — that would mean a hot loop spending tokens on a broken goal.
+    // Honor the goal's interval even when the check fails.
+    goal.lastCheckedAt = Date.now();
+    goal.checks++;
+    this.save();
+
     const client = new Anthropic({ apiKey: this.apiKey });
 
     const userMessage = [
@@ -245,18 +269,17 @@ export class GoalsService {
       .map((b) => b.text)
       .join('');
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      goal.lastCheckedAt = Date.now();
-      goal.checks++;
-      this.save();
+    if (!jsonMatch) return;
+
+    let result: GoalCheckResult;
+    try {
+      result = JSON.parse(jsonMatch[0]) as GoalCheckResult;
+    } catch (err) {
+      console.error(`[Goals] Bad JSON from checker for ${goal.id}: ${(err as Error).message}`);
       return;
     }
 
-    const result = JSON.parse(jsonMatch[0]) as GoalCheckResult;
-
-    goal.lastCheckedAt = Date.now();
     goal.lastSummary = result.summary;
-    goal.checks++;
 
     if (result.status === 'met') {
       goal.status = 'completed';

@@ -258,7 +258,8 @@ app.get('/api/system/health', (_req, res) => {
 
 // Audit log feed — what dangerous/moderate things did Merlin do?
 app.get('/api/audit', authMiddleware, (req, res) => {
-  const limit = Math.min(parseInt((req.query.limit as string) || '50', 10), 500);
+  const raw = parseInt((req.query.limit as string) || '50', 10);
+  const limit = Math.min(Math.max(Number.isFinite(raw) ? raw : 50, 1), 500);
   res.json({ entries: readAuditLog(limit) });
 });
 
@@ -1934,8 +1935,13 @@ wss.on('connection', (ws: WebSocket, req) => {
         (ws as any).__isAlive = true;
         safeSend(ws, JSON.stringify({ type: 'pong', payload: {} }));
       } else if (msg.type === 'abort') {
-        // For future: abort running operation
+        // User pressed Stop. Abort the in-flight stream + emit message_done
+        // so the UI re-enables the input. The agent loop will see this.aborted
+        // and exit on its next iteration.
         console.log(`[${connectionId}] Abort requested`);
+        try { agent.abort('user_stop'); } catch (err) {
+          console.error(`[${connectionId}] Abort failed:`, (err as Error).message);
+        }
       } else if (msg.type === 'set_live_mode') {
         const live = msg.payload.enabled === true;
         agent.setLiveMode(live);

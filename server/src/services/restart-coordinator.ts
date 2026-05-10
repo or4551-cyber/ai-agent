@@ -40,6 +40,10 @@ class RestartCoordinator {
   private broadcast: BroadcastHandler | null = null;
   private draining = false;
   private installed = false;
+  // Dedupe restart_imminent broadcasts. scheduleRestart fires one when the
+  // flag is written; drain() fires another on SIGTERM. Without this guard
+  // the UI shows the "Merlin is updating" note twice per self-update.
+  private alreadyAnnounced = false;
 
   install(broadcast: BroadcastHandler): void {
     if (this.installed) return;
@@ -72,14 +76,17 @@ class RestartCoordinator {
     fs.writeFileSync(FLAG_PATH, JSON.stringify(flag, null, 2));
     console.log(`[Restart] Flag written: ${reason} (op=${op})`);
     // Notify clients early so the UI can show "Merlin is updating..."
-    if (this.broadcast) {
+    if (this.broadcast && !this.alreadyAnnounced) {
+      this.alreadyAnnounced = true;
       this.broadcast({
         type: 'restart_imminent',
         payload: {
           reason,
           op,
-          etaMs: DRAIN_MS + 2000,
-          willResume: true, // session restore is wired up
+          // For 'update' ops the supervisor also runs git pull + npm install +
+          // build before respawning, so the real ETA is much longer than DRAIN_MS.
+          etaMs: op === 'update' ? 180_000 : DRAIN_MS + 2000,
+          willResume: true,
         },
       });
     }
@@ -87,11 +94,11 @@ class RestartCoordinator {
 
   // Save a record of the *previous* run so the next worker can show
   // "Merlin restarted at HH:MM (reason: X)" on first contact.
-  recordRestartCompletion(): void {
+  recordRestartCompletion(wasGraceful: boolean = true): void {
     try {
       const state = {
         completedAt: Date.now(),
-        wasGraceful: true,
+        wasGraceful,
       };
       fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
     } catch {}
@@ -107,29 +114,30 @@ class RestartCoordinator {
   }
 
   // Run all registered drain handlers in parallel, with a hard deadline.
+  // Reports wasGraceful=true ONLY if all handlers settled before the timer ran out.
   private async drain(reason: string): Promise<void> {
     if (this.draining) return;
     this.draining = true;
 
-    if (this.broadcast) {
+    if (this.broadcast && !this.alreadyAnnounced) {
+      this.alreadyAnnounced = true;
       this.broadcast({
         type: 'restart_imminent',
         payload: { reason, etaMs: DRAIN_MS, willResume: true, draining: true },
       });
     }
 
-    const tasks = this.drainHandlers.map(async (h) => {
-      try {
-        await h();
-      } catch (err) {
+    let completedNaturally = false;
+    const tasks = Promise.all(this.drainHandlers.map(async (h) => {
+      try { await h(); } catch (err) {
         console.error('[Restart] Drain handler failed (non-fatal):', (err as Error).message);
       }
-    });
+    })).then(() => { completedNaturally = true; });
 
-    const deadline = new Promise((resolve) => setTimeout(resolve, DRAIN_MS));
-    await Promise.race([Promise.all(tasks), deadline]);
-    this.recordRestartCompletion();
-    console.log('[Restart] Drain complete');
+    const deadline = new Promise<void>((resolve) => setTimeout(resolve, DRAIN_MS));
+    await Promise.race([tasks, deadline]);
+    this.recordRestartCompletion(completedNaturally);
+    console.log(`[Restart] Drain complete (graceful=${completedNaturally})`);
   }
 }
 

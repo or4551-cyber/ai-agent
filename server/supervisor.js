@@ -38,10 +38,32 @@ let crashCount = 0;
 let lastCrashAt = 0;
 let stopping = false;
 
+// Ensure the log directory exists before our first write (otherwise the
+// catch-all swallows ENOENT silently and we miss everything until something
+// else creates ~/.ai-agent).
+try { fs.mkdirSync(path.dirname(SUPERVISOR_LOG), { recursive: true }); } catch {}
+
+const SUPERVISOR_LOG_MAX_BYTES = 5 * 1024 * 1024;
+function rotateLogIfNeeded() {
+  try {
+    if (!fs.existsSync(SUPERVISOR_LOG)) return;
+    if (fs.statSync(SUPERVISOR_LOG).size < SUPERVISOR_LOG_MAX_BYTES) return;
+    const rotated = SUPERVISOR_LOG + '.1';
+    if (fs.existsSync(rotated)) fs.unlinkSync(rotated);
+    fs.renameSync(SUPERVISOR_LOG, rotated);
+  } catch {}
+}
+
+let logWritesSinceRotate = 0;
 function log(line) {
   const ts = new Date().toISOString();
   const msg = `[supervisor ${ts}] ${line}\n`;
   process.stdout.write(msg);
+  // Cheap amortized rotation check.
+  if (++logWritesSinceRotate > 200) {
+    logWritesSinceRotate = 0;
+    rotateLogIfNeeded();
+  }
   try { fs.appendFileSync(SUPERVISOR_LOG, msg); } catch {}
 }
 
@@ -75,9 +97,13 @@ function spawnWorker() {
 
     if (restartingForOp) {
       // We asked for this. Perform the post-stop work, then respawn.
+      // Always respawn even if handlePostStop throws — staying down because
+      // git failed is much worse than running stale code.
       const op = restartingForOp;
       restartingForOp = null;
-      handlePostStop(op).then(() => spawnWorker());
+      handlePostStop(op)
+        .catch((e) => log('handlePostStop threw (will respawn anyway): ' + (e && e.message)))
+        .then(() => spawnWorker());
       return;
     }
 
@@ -97,14 +123,36 @@ function spawnWorker() {
 
 async function handlePostStop(op) {
   if (op === 'update') {
-    log('Running self-update: git pull + npm install');
+    // Full self-update: pull code, install deps, REBUILD both server (TS→JS)
+    // and web (Next.js → static export). Without rebuild the new worker
+    // would still run the old dist/server.js and the old web/out/ bundle.
+    const repoRoot = path.dirname(__dirname);
+    const webDir = path.join(repoRoot, 'web');
+    log('Self-update: git pull');
     try {
-      await runSync('git', ['pull', '--ff-only'], { cwd: path.dirname(__dirname) });
-      await runSync('npm', ['install'], { cwd: __dirname });
-      log('Self-update complete');
+      await runSync('git', ['pull', '--ff-only'], { cwd: repoRoot });
     } catch (err) {
-      log('Self-update failed (will restart anyway): ' + err.message);
+      log('git pull failed (continuing anyway): ' + err.message);
     }
+    log('Self-update: npm install (server)');
+    try { await runSync('npm', ['install'], { cwd: __dirname }); } catch (err) {
+      log('server npm install failed: ' + err.message);
+    }
+    log('Self-update: npm run build (server)');
+    try { await runSync('npm', ['run', 'build'], { cwd: __dirname }); } catch (err) {
+      log('server build failed (will run old dist): ' + err.message);
+    }
+    if (fs.existsSync(path.join(webDir, 'package.json'))) {
+      log('Self-update: npm install (web)');
+      try { await runSync('npm', ['install'], { cwd: webDir }); } catch (err) {
+        log('web npm install failed: ' + err.message);
+      }
+      log('Self-update: npm run build (web) — this is the slowest step');
+      try { await runSync('npm', ['run', 'build'], { cwd: webDir }); } catch (err) {
+        log('web build failed (frontend may be stale): ' + err.message);
+      }
+    }
+    log('Self-update complete');
   }
 }
 
@@ -137,10 +185,20 @@ function requestWorkerStop(op) {
 function pollFlag() {
   if (stopping) return;
   const flag = readFlag();
-  if (flag && !restartingForOp) {
-    log(`Flag detected: reason="${flag.reason}" op=${flag.op || 'restart'}`);
-    clearFlag();
-    requestWorkerStop(flag.op || 'restart');
+  if (flag) {
+    if (restartingForOp) {
+      // A restart is already in progress (worker draining, or post-stop work
+      // running). Leave the flag in place; we'll pick it up on the next poll
+      // once the current op completes. Without this, a second flag arriving
+      // mid-update would be silently discarded.
+    } else if (!worker || worker.killed) {
+      // Worker isn't alive yet (still in handlePostStop or initial spawn).
+      // Keep the flag; we'll handle it once the worker is up.
+    } else {
+      log(`Flag detected: reason="${flag.reason}" op=${flag.op || 'restart'}`);
+      clearFlag();
+      requestWorkerStop(flag.op || 'restart');
+    }
   }
   setTimeout(pollFlag, POLL_MS);
 }

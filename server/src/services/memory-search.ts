@@ -292,15 +292,6 @@ function conversationCandidates(): IndexCandidate[] {
   return out;
 }
 
-interface PersonalityEpisode {
-  id?: string;
-  summary?: string;
-  emotion?: string;
-  people?: string[];
-  importance?: number;
-  timestamp?: number;
-}
-
 function episodeCandidates(): IndexCandidate[] {
   const personality = loadJson<{ episodes?: PersonalityEpisode[] }>(PERSONALITY_FILE, {});
   const out: IndexCandidate[] = [];

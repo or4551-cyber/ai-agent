@@ -9,27 +9,51 @@ export function isDryRun(input: Record<string, unknown>): boolean {
   return input.dry_run === true;
 }
 
+// Defensive walker: lstat (don't follow symlinks → can't loop into / or $HOME),
+// hard cap on file count and recursion depth, so a dry-run can't DoS the agent.
+const DRY_RUN_MAX_FILES = 50_000;
+const DRY_RUN_MAX_DEPTH = 12;
+
 export function dryRunDelete(filePath: string, recursive: boolean): string {
   try {
-    const stat = fs.statSync(filePath);
+    const stat = fs.lstatSync(filePath);
+    if (stat.isSymbolicLink()) {
+      return `🟡 Dry-run: would delete symlink ${filePath} (target NOT followed).`;
+    }
     if (stat.isDirectory()) {
       if (!recursive) return `🟡 Dry-run: would refuse — ${filePath} is a directory and recursive=false.`;
       let count = 0;
       let bytes = 0;
-      const walk = (p: string) => {
-        const entries = fs.readdirSync(p, { withFileTypes: true });
+      let truncated = false;
+      const walk = (p: string, depth: number): void => {
+        if (truncated) return;
+        if (depth > DRY_RUN_MAX_DEPTH) { truncated = true; return; }
+        let entries: fs.Dirent[];
+        try {
+          entries = fs.readdirSync(p, { withFileTypes: true });
+        } catch { return; }
         for (const e of entries) {
+          if (truncated) return;
+          if (count >= DRY_RUN_MAX_FILES) { truncated = true; return; }
           const full = `${p}/${e.name}`;
-          if (e.isDirectory()) walk(full);
-          else {
-            count++;
-            try { bytes += fs.statSync(full).size; } catch {}
-          }
+          try {
+            const lst = fs.lstatSync(full);
+            if (lst.isSymbolicLink()) continue; // never follow
+            if (lst.isDirectory()) {
+              walk(full, depth + 1);
+            } else {
+              count++;
+              bytes += lst.size;
+            }
+          } catch { /* unreadable entry — skip */ }
         }
       };
-      walk(filePath);
+      walk(filePath, 0);
       const mb = (bytes / 1024 / 1024).toFixed(2);
-      return `🟡 Dry-run: would delete directory ${filePath} (${count} files, ${mb} MB).`;
+      const suffix = truncated
+        ? ` (preview truncated at ${count} files / depth ${DRY_RUN_MAX_DEPTH} — actual size may be larger)`
+        : '';
+      return `🟡 Dry-run: would delete directory ${filePath} (${count} files, ${mb} MB)${suffix}.`;
     }
     const mb = (stat.size / 1024 / 1024).toFixed(2);
     return `🟡 Dry-run: would delete file ${filePath} (${mb} MB).`;

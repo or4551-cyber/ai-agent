@@ -32,7 +32,22 @@ function getConversations(): Conversation[] {
   if (typeof window === 'undefined') return [];
   try {
     const data = localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : [];
+    if (!data) return [];
+    const parsed = JSON.parse(data) as Conversation[];
+    // Sanitize stale tool-call statuses on rehydration. A conversation saved
+    // mid-turn might have status 'running' or 'pending_approval' — restoring
+    // it as-is would resurrect a broken approve/reject button on a tool call
+    // that already finished hours/days ago. Coerce to a terminal state.
+    for (const c of parsed) {
+      for (const m of c.messages || []) {
+        for (const tc of m.toolCalls || []) {
+          if (tc.status === 'running' || tc.status === 'pending_approval') {
+            tc.status = 'timeout';
+          }
+        }
+      }
+    }
+    return parsed;
   } catch {
     return [];
   }

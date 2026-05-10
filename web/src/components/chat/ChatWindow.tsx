@@ -707,6 +707,12 @@ export default function ChatWindow() {
       {/* Input */}
       <ChatInput
         onSend={handleSend}
+        onAbort={() => {
+          wsRef.current?.send('abort', {});
+          // Optimistic local update: don't wait for the server's message_done.
+          setIsStreaming(false);
+          setTypingStatus('idle');
+        }}
         disabled={isStreaming}
         isStreaming={isStreaming}
         alerts={alerts}
