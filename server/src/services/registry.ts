@@ -20,6 +20,7 @@ import { ConversationHistoryService } from './conversation-history';
 import { SmartAlertsService } from './smart-alerts';
 import { AgentMemory } from '../agent/memory';
 import { UpdateAwareness } from './update-awareness';
+import { GoalsService } from './goals';
 
 export const reminderService = new ReminderService();
 export const routineService = new RoutineService();
@@ -31,3 +32,15 @@ export const conversationHistoryService = new ConversationHistoryService();
 export const smartAlertsService = new SmartAlertsService();
 export const agentMemory = new AgentMemory();
 export const updateAwareness = new UpdateAwareness();
+
+// GoalsService needs the Anthropic API key to spawn its checker calls.
+// We construct it lazily so the rest of the app can import this registry
+// without requiring the env var to be set yet.
+let _goalsService: GoalsService | null = null;
+export function getGoalsService(): GoalsService {
+  if (!_goalsService) {
+    const apiKey = process.env.ANTHROPIC_API_KEY || '';
+    _goalsService = new GoalsService(apiKey);
+  }
+  return _goalsService;
+}

@@ -1524,7 +1524,7 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
     dangerLevel: 'safe',
     definition: {
       name: 'memory_search',
-      description: 'Semantic-style search across all of Merlin\'s long-term memory: conversation history, episodic memories, key-value memories, and quick notes. Use this when the user asks about something said or done in the past ("מה אמרתי לך על X?", "תזכיר לי את ההמלצה שנתת לי").',
+      description: 'Semantic search across all of Merlin\'s long-term memory: conversation history, episodic memories, key-value memories, and quick notes. Uses vector embeddings when VOYAGE_API_KEY is configured (finds matches even when wording is different), falls back to keyword search otherwise. Use this when the user asks about something said or done in the past ("מה אמרתי לך על X?", "תזכיר לי את ההמלצה שנתת לי").',
       input_schema: {
         type: 'object',
         properties: {
@@ -1532,6 +1532,112 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
           limit: { type: 'number', description: 'Max results to return (default 5)' },
         },
         required: ['query'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'memory_reindex',
+      description: 'Build or refresh the vector index for semantic memory search. Idempotent — only embeds items not already indexed. Run this once after configuring VOYAGE_API_KEY, or when search feels stale. Auto-runs on startup so manual calls are rarely needed.',
+      input_schema: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'memory_stats',
+      description: 'Show how many memory items are indexed for semantic search and which mode is active (vector vs keyword).',
+      input_schema: { type: 'object', properties: {}, required: [] },
+    },
+  },
+
+  // ===== GOALS (proactive autonomy) =====
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'goal_add',
+      description: 'Create a long-running goal that Merlin will monitor in the background. Use this for ongoing intents like "watch X", "remind me when Y happens", "weekly summarize Z". The agent will check on the goal at the chosen interval and notify the user only when there is something worth saying. Default interval is daily.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          description: { type: 'string', description: 'What is the goal in the user\'s own words. Required.' },
+          success_criteria: { type: 'string', description: 'How to know the goal is met. Optional but recommended.' },
+          check_interval_minutes: { type: 'number', description: 'How often to check, in minutes. Default 1440 (daily). Minimum 30.' },
+          notify_on: { type: 'string', description: '"change" (default — only notify when something changed), "always" (notify on every check that yields output), or "completion" (only when goal is met or failed).' },
+        },
+        required: ['description'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'safe',
+    definition: {
+      name: 'goal_list',
+      description: 'List active and paused goals Merlin is tracking. Pass include_completed=true to also see done goals.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include_completed: { type: 'boolean' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'goal_pause',
+      description: 'Pause an active goal so Merlin stops checking on it. Resume later with goal_resume.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+        required: ['id'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'goal_resume',
+      description: 'Resume a paused goal.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+        required: ['id'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'moderate',
+    definition: {
+      name: 'goal_complete',
+      description: 'Mark a goal as completed (whether or not the auto-checker thinks so).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          summary: { type: 'string', description: 'Optional final summary' },
+        },
+        required: ['id'],
+      },
+    },
+  },
+  {
+    dangerLevel: 'dangerous',
+    definition: {
+      name: 'goal_delete',
+      description: 'Delete a goal entirely. Use sparingly — usually goal_complete is better since it preserves history.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+        required: ['id'],
       },
     },
   },

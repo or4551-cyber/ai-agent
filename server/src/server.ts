@@ -37,6 +37,10 @@ import {
 } from './services/crash-shield';
 import { restartCoordinator } from './services/restart-coordinator';
 import { readRecent as readAuditLog } from './services/audit-log';
+import { embeddings } from './services/embeddings';
+import { vectorStore } from './services/vector-store';
+import { reindexAll as reindexMemory } from './services/memory-search';
+import { getGoalsService } from './services/registry';
 
 dotenv.config();
 
@@ -1675,7 +1679,41 @@ restartCoordinator.onDrain(async () => {
       console.error('[Restart] saveSession failed:', (err as Error).message);
     }
   }
+  // Flush the vector store so any pending embeddings make it to disk
+  // before the new worker spins up.
+  try { vectorStore.flushNow(); } catch {}
 });
+
+// Background indexing on startup. Runs once after a short delay so it doesn't
+// fight server boot for resources. Voyage is rate-limited; reindex is
+// idempotent so future runs only embed new items.
+if (embeddings.isAvailable()) {
+  setTimeout(() => {
+    reindexMemory()
+      .then((r) => console.log(`[MemorySearch] Background reindex: +${r.added} (${r.total} total)`))
+      .catch((err) => console.error('[MemorySearch] Background reindex failed:', (err as Error).message));
+  }, 10_000).unref?.();
+}
+
+// Goals service — proactive autonomy. Re-uses the proactive-action channel
+// so notifications surface in the existing UI banner + WS path the user is
+// already familiar with from reminders/alerts.
+const goalsService = getGoalsService();
+goalsService.setNotifyHandler((goal, result) => {
+  const message = result.notificationMessage || `🎯 ${goal.description}: ${result.summary}`;
+  const action = {
+    id: `goal-${goal.id}-${Date.now()}`,
+    type: 'goal_update',
+    title: result.status === 'met' ? '🎯 מטרה הושגה' : result.status === 'failed' ? '❌ מטרה נכשלה' : '🎯 עדכון מטרה',
+    message,
+    timestamp: Date.now(),
+    priority: result.status === 'met' || result.status === 'failed' ? 'high' : 'normal',
+    goalId: goal.id,
+  };
+  broadcastToAll({ type: 'proactive_action', payload: action });
+});
+goalsService.start();
+restartCoordinator.onDrain(() => { try { goalsService.stop(); } catch {} });
 
 // Proactive agent broadcasts to all connected clients
 proactiveAgent.setNotifyHandler((action) => {

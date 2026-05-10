@@ -9,6 +9,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { agentMemory, conversationHistoryService } from './registry';
 import { ChatMessage } from '../types';
+import { embeddings } from './embeddings';
+import { vectorStore, VectorItem, VectorSource } from './vector-store';
 
 const HOME = process.env.HOME || '.';
 const NOTES_FILE = path.join(HOME, '.ai-agent', 'notes.json');
@@ -84,7 +86,59 @@ function loadJson<T>(file: string, fallback: T): T {
   }
 }
 
+// Synchronous keyword-only search — kept for callers that can't await.
 export function search(query: string, limit = 5): MemoryHit[] {
+  return searchKeyword(query, limit);
+}
+
+// Async hybrid search — uses vectors when available, merges with keyword
+// hits, dedupes by ref, and re-ranks. Falls back gracefully if no API key.
+export async function searchAsync(query: string, limit = 5): Promise<MemoryHit[]> {
+  const keywordHits = searchKeyword(query, limit * 2);
+
+  // No embeddings configured? Just return keyword hits.
+  if (!embeddings.isAvailable()) return keywordHits.slice(0, limit);
+
+  let vectorHits: MemoryHit[] = [];
+  try {
+    const queryVec = await embeddings.embed(query, { inputType: 'query' });
+    if (queryVec) {
+      const raw = vectorStore.search(queryVec, limit * 2, 0.35);
+      vectorHits = raw.map((r) => ({
+        source: r.item.source,
+        title: r.item.text.slice(0, 50),
+        excerpt: r.item.text.length > 180 ? r.item.text.slice(0, 180) + '…' : r.item.text,
+        // Vector cosine sits in [0..1]. Re-scale to roughly match keyword scores
+        // (which are open-ended) so the merge ranks comparably.
+        score: r.score * 12,
+        timestamp: r.item.ts,
+        ref: r.item.ref,
+      }));
+    }
+  } catch (err) {
+    console.error('[MemorySearch] Vector search failed (fallback to keyword):', (err as Error).message);
+  }
+
+  // Merge: dedupe by ref, sum scores when both keyword and vector hit the same item.
+  const merged = new Map<string, MemoryHit>();
+  const keyOf = (h: MemoryHit) => `${h.source}:${h.ref || h.title}`;
+  for (const h of [...keywordHits, ...vectorHits]) {
+    const k = keyOf(h);
+    const existing = merged.get(k);
+    if (existing) {
+      existing.score += h.score;
+      if (!existing.excerpt && h.excerpt) existing.excerpt = h.excerpt;
+    } else {
+      merged.set(k, { ...h });
+    }
+  }
+
+  return [...merged.values()]
+    .sort((a, b) => b.score - a.score || (b.timestamp || 0) - (a.timestamp || 0))
+    .slice(0, limit);
+}
+
+function searchKeyword(query: string, limit: number): MemoryHit[] {
   const tokens = tokenize(query);
   if (tokens.length === 0) return [];
 
@@ -168,8 +222,8 @@ export function search(query: string, limit = 5): MemoryHit[] {
   return hits.slice(0, limit);
 }
 
-export function searchAsText(query: string, limit = 5): string {
-  const hits = search(query, limit);
+export async function searchAsText(query: string, limit = 5): Promise<string> {
+  const hits = await searchAsync(query, limit);
   if (hits.length === 0) return `🔍 לא מצאתי שום זיכרון שקשור ל-"${query}".`;
 
   const lines = [`🔍 ${hits.length} תוצאות עבור "${query}":`, ''];
@@ -185,5 +239,146 @@ export function searchAsText(query: string, limit = 5): string {
     lines.push(`   ${h.excerpt}`);
     lines.push('');
   }
+  if (embeddings.isAvailable()) {
+    lines.push(`_(חיפוש חכם פעיל — ${vectorStore.size()} פריטים מאונדקסים)_`);
+  }
   return lines.join('\n');
+}
+
+// ===== INDEXING =====
+// Reindex all memory sources into the vector store. Runs in the background
+// so it doesn't block startup. Idempotent: only embeds items not already in the
+// store (or whose text has changed).
+
+interface IndexCandidate {
+  id: string;
+  source: VectorSource;
+  ref: string;
+  text: string;
+  ts: number;
+}
+
+function memoryCandidates(): IndexCandidate[] {
+  return agentMemory.list().map((m) => ({
+    id: `memory:${m.key}`,
+    source: 'memory' as const,
+    ref: m.key,
+    text: `${m.key}: ${m.value}`,
+    ts: Date.parse(m.updatedAt) || Date.now(),
+  }));
+}
+
+function conversationCandidates(): IndexCandidate[] {
+  const out: IndexCandidate[] = [];
+  try {
+    const { conversations } = conversationHistoryService.list(100, 0);
+    for (const cidx of conversations) {
+      const conv = conversationHistoryService.get(cidx.id);
+      if (!conv) continue;
+      const fulltext = conv.messages
+        .map((m: ChatMessage) => `${m.role}: ${m.content}`)
+        .join('\n')
+        .slice(0, 4000); // truncate long convs — Voyage will truncate anyway
+      if (!fulltext.trim()) continue;
+      out.push({
+        id: `conv:${conv.id}`,
+        source: 'conversation',
+        ref: conv.id,
+        text: fulltext,
+        ts: conv.updatedAt,
+      });
+    }
+  } catch {}
+  return out;
+}
+
+interface PersonalityEpisode {
+  id?: string;
+  summary?: string;
+  emotion?: string;
+  people?: string[];
+  importance?: number;
+  timestamp?: number;
+}
+
+function episodeCandidates(): IndexCandidate[] {
+  const personality = loadJson<{ episodes?: PersonalityEpisode[] }>(PERSONALITY_FILE, {});
+  const out: IndexCandidate[] = [];
+  let i = 0;
+  for (const ep of personality.episodes || []) {
+    const text = `${ep.summary || ''} ${ep.emotion || ''} ${(ep.people || []).join(' ')}`.trim();
+    if (!text) continue;
+    out.push({
+      id: `episode:${ep.id || `ep_${i++}`}`,
+      source: 'episode',
+      ref: ep.id || `ep_${i}`,
+      text,
+      ts: ep.timestamp || Date.now(),
+    });
+  }
+  return out;
+}
+
+function noteCandidates(): IndexCandidate[] {
+  return loadJson<Note[]>(NOTES_FILE, []).map((n) => ({
+    id: `note:${n.id}`,
+    source: 'note' as const,
+    ref: n.id,
+    text: (n.tag ? `[${n.tag}] ` : '') + n.text,
+    ts: n.createdAt,
+  }));
+}
+
+let indexingInFlight: Promise<{ added: number; skipped: number }> | null = null;
+
+// Index everything. Returns counts. Skips items already in the store.
+// Held behind a single in-flight promise so concurrent callers share work.
+export async function reindexAll(): Promise<{ added: number; skipped: number; total: number }> {
+  if (!embeddings.isAvailable()) {
+    return { added: 0, skipped: 0, total: vectorStore.size() };
+  }
+  if (indexingInFlight) {
+    const r = await indexingInFlight;
+    return { ...r, total: vectorStore.size() };
+  }
+
+  indexingInFlight = (async () => {
+    const all: IndexCandidate[] = [
+      ...memoryCandidates(),
+      ...conversationCandidates(),
+      ...episodeCandidates(),
+      ...noteCandidates(),
+    ];
+
+    const fresh = all.filter((c) => !vectorStore.has(c.id));
+    const skipped = all.length - fresh.length;
+    if (fresh.length === 0) return { added: 0, skipped };
+
+    console.log(`[MemorySearch] Indexing ${fresh.length} new items (${skipped} already indexed)`);
+    const vectors = await embeddings.embedBatch(fresh.map((c) => c.text), { inputType: 'document' });
+
+    const items: VectorItem[] = [];
+    for (let i = 0; i < fresh.length; i++) {
+      const v = vectors[i];
+      if (!v) continue;
+      items.push({
+        id: fresh[i].id,
+        source: fresh[i].source,
+        ref: fresh[i].ref,
+        text: fresh[i].text,
+        vec: v,
+        ts: fresh[i].ts,
+      });
+    }
+    vectorStore.upsertMany(items);
+    console.log(`[MemorySearch] Indexed ${items.length} new items`);
+    return { added: items.length, skipped };
+  })();
+
+  try {
+    const r = await indexingInFlight;
+    return { ...r, total: vectorStore.size() };
+  } finally {
+    indexingInFlight = null;
+  }
 }

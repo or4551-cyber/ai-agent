@@ -13,8 +13,11 @@ import {
   agentMemory as memory,
   reminderService,
   routineService,
+  getGoalsService,
 } from '../services/registry';
-import { searchAsText as memorySearchText } from '../services/memory-search';
+import { searchAsText as memorySearchText, reindexAll as memoryReindex } from '../services/memory-search';
+import { embeddings } from '../services/embeddings';
+import { vectorStore } from '../services/vector-store';
 import { systemStatus, systemRestart, systemUpdate } from '../tools/system-tools';
 import { registerTools } from './tool-registry';
 import { isDryRun, dryRunDelete, dryRunCommand, dryRunSend } from './dry-run';
@@ -132,8 +135,84 @@ registerTools({
     routineService.remove(i.id as string) ? 'Routine deleted.' : 'Routine not found.',
 
   // ===== Memory Search =====
-  memory_search: (i) =>
+  memory_search: async (i) =>
     memorySearchText(i.query as string, (i.limit as number) || 5),
+
+  memory_reindex: async () => {
+    if (!embeddings.isAvailable()) {
+      return '⚠️ חיפוש וקטורי לא פעיל. הוסף `VOYAGE_API_KEY` ב-.env (קבל מ-voyageai.com) והפעל מחדש.';
+    }
+    const r = await memoryReindex();
+    return [
+      `🔁 אינדוקס הסתיים`,
+      `נוסף: ${r.added}`,
+      `דולג (כבר באינדקס): ${r.skipped}`,
+      `סה״כ באינדקס: ${r.total}`,
+    ].join('\n');
+  },
+
+  memory_stats: () => {
+    const stats = vectorStore.stats();
+    return [
+      `📊 סטטיסטיקת זיכרון וקטורי`,
+      `מצב חיפוש: ${embeddings.isAvailable() ? '✅ וקטורי + מילולי' : '⚠️ מילולי בלבד (אין VOYAGE_API_KEY)'}`,
+      `סה״כ פריטים מאונדקסים: ${stats.total}`,
+      `  - 💾 זיכרונות: ${stats.bySource.memory}`,
+      `  - 💬 שיחות: ${stats.bySource.conversation}`,
+      `  - 📍 אירועים: ${stats.bySource.episode}`,
+      `  - 📝 פתקים: ${stats.bySource.note}`,
+    ].join('\n');
+  },
+
+  // ===== Goals (proactive autonomy) =====
+  goal_add: (i) => {
+    const g = getGoalsService().add({
+      description: i.description as string,
+      successCriteria: i.success_criteria as string | undefined,
+      checkIntervalMinutes: i.check_interval_minutes as number | undefined,
+      notifyOn: i.notify_on as 'always' | 'change' | 'completion' | undefined,
+    });
+    const hours = Math.round(g.checkIntervalMinutes / 60);
+    return [
+      `🎯 מטרה חדשה הוגדרה`,
+      `ID: ${g.id}`,
+      `מה: ${g.description}`,
+      g.successCriteria ? `הצלחה: ${g.successCriteria}` : '',
+      `בדיקה: כל ${hours < 24 ? `${hours} שעות` : `${Math.round(hours / 24)} ימים`}`,
+      `התראה: ${g.notifyOn === 'always' ? 'תמיד' : g.notifyOn === 'change' ? 'רק כששינוי' : 'רק בסיום'}`,
+    ].filter(Boolean).join('\n');
+  },
+
+  goal_list: (i) => {
+    const goals = getGoalsService().list((i.include_completed as boolean) || false);
+    if (goals.length === 0) return 'אין מטרות פעילות כרגע. השתמש ב-goal_add כדי ליצור.';
+    const statusIcon: Record<string, string> = {
+      active: '🟢', paused: '⏸', completed: '✅', failed: '❌',
+    };
+    const lines = [`🎯 ${goals.length} מטרות:`, ''];
+    for (const g of goals) {
+      const last = g.lastCheckedAt ? new Date(g.lastCheckedAt).toLocaleDateString('he-IL') : 'טרם נבדק';
+      lines.push(`${statusIcon[g.status] || '·'} [${g.id}] ${g.description}`);
+      lines.push(`   בדיקות: ${g.checks} · התראות: ${g.notifications} · אחרון: ${last}`);
+      if (g.lastSummary) lines.push(`   📝 ${g.lastSummary}`);
+      lines.push('');
+    }
+    return lines.join('\n');
+  },
+
+  goal_pause: (i) =>
+    getGoalsService().pause(i.id as string) ? '⏸ המטרה הושהתה.' : 'מטרה לא נמצאה.',
+
+  goal_resume: (i) =>
+    getGoalsService().resume(i.id as string) ? '🟢 המטרה חזרה לפעילות.' : 'מטרה לא נמצאה או הושלמה.',
+
+  goal_complete: (i) =>
+    getGoalsService().complete(i.id as string, i.summary as string | undefined)
+      ? '✅ המטרה סומנה כהושלמה.'
+      : 'מטרה לא נמצאה.',
+
+  goal_delete: (i) =>
+    getGoalsService().delete(i.id as string) ? '🗑 המטרה נמחקה.' : 'מטרה לא נמצאה.',
 
   // ===== Self-maintenance =====
   system_status: () => systemStatus(),
