@@ -1508,7 +1508,7 @@ export const TOOL_DEFINITIONS: ToolMeta[] = [
     dangerLevel: 'dangerous',
     definition: {
       name: 'system_update',
-      description: 'Pull the latest Merlin code from git, run npm install, and restart gracefully. Sessions and memory persist. Only call this when the user explicitly asks Merlin to update itself.',
+      description: 'Pull Merlin\'s latest code from git, run npm install, and restart gracefully. Sessions and memory persist. **CALL THIS** whenever the user says "תעדכן את עצמך", "update yourself", "תוריד את הגרסה החדשה", "תרענן", or any phrasing that means "fetch new code for me". DO NOT use run_command with pkg/apt for this — those update Termux packages, not Merlin\'s own code.',
       input_schema: {
         type: 'object',
         properties: {
