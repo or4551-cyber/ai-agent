@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, Square, ImagePlus, X, Mic, MicOff } from 'lucide-react';
+import { Send, Square, ImagePlus, X, Mic, MicOff, Compass } from 'lucide-react';
 import type { ProactiveAlert } from '@/lib/api';
 
 export interface ImageAttachment {
@@ -19,6 +19,8 @@ interface ChatInputProps {
   hasMessages?: boolean;
   autoVoice?: boolean;
   onAutoVoiceConsumed?: () => void;
+  planMode?: boolean;
+  onPlanModeChange?: (enabled: boolean) => void;
 }
 
 function getContextChips(alerts?: ProactiveAlert[]): { label: string; msg: string }[] {
@@ -54,7 +56,7 @@ function getContextChips(alerts?: ProactiveAlert[]): { label: string; msg: strin
   ];
 }
 
-export default function ChatInput({ onSend, onAbort, disabled, isStreaming, alerts, hasMessages, autoVoice, onAutoVoiceConsumed }: ChatInputProps) {
+export default function ChatInput({ onSend, onAbort, disabled, isStreaming, alerts, hasMessages, autoVoice, onAutoVoiceConsumed, planMode = false, onPlanModeChange }: ChatInputProps) {
   const [input, setInput] = useState('');
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [isListening, setIsListening] = useState(false);
@@ -175,6 +177,14 @@ export default function ChatInput({ onSend, onAbort, disabled, isStreaming, aler
 
   return (
     <div className="glass border-t border-[var(--border)] px-3 py-3 pb-[env(safe-area-inset-bottom)] shrink-0">
+      {/* Planning-mode banner — high-visibility so the user always knows mutations are blocked. */}
+      {planMode && (
+        <div className="mb-2 max-w-3xl mx-auto px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-[12px] text-cyan-200 flex items-center gap-2">
+          <Compass size={14} className="text-cyan-400 shrink-0" />
+          <span className="flex-1">מצב תכנון: מרלין יציג תוכנית לפני ביצוע. אישור מסיר את הסימון.</span>
+        </div>
+      )}
+
       {/* Context Chips */}
       {hasMessages && !isStreaming && chips.length > 0 && (
         <div className="flex gap-1.5 mb-2 max-w-3xl mx-auto overflow-x-auto pb-0.5 scrollbar-hide">
@@ -228,6 +238,21 @@ export default function ChatInput({ onSend, onAbort, disabled, isStreaming, aler
           title="Attach image"
         >
           <ImagePlus size={20} />
+        </button>
+        {/* Planning mode toggle — when on, agent only reads/proposes; mutations are blocked. */}
+        <button
+          onClick={() => onPlanModeChange?.(!planMode)}
+          disabled={disabled}
+          aria-pressed={planMode}
+          aria-label={planMode ? 'כבה מצב תכנון' : 'הפעל מצב תכנון'}
+          className={`flex items-center justify-center w-11 h-11 rounded-2xl transition-all disabled:opacity-30 shrink-0 ${
+            planMode
+              ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/30'
+              : 'hover:bg-[var(--muted)] text-[var(--muted-foreground)]'
+          }`}
+          title={planMode ? 'מצב תכנון פעיל — לחץ לכיבוי' : 'מצב תכנון: מרלין יציג תוכנית לפני ביצוע'}
+        >
+          <Compass size={20} />
         </button>
         {hasSpeechAPI && (
           <button

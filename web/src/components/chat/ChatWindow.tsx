@@ -53,6 +53,12 @@ export default function ChatWindow() {
   const [isOnline, setIsOnline] = useState(true);
   const [queueSize, setQueueSize] = useState(0);
   const [autoVoice, setAutoVoice] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
+
+  const handlePlanModeChange = (enabled: boolean) => {
+    setPlanMode(enabled);
+    wsRef.current?.send('set_plan_mode', { enabled });
+  };
   const wsRef = useRef<AgentWebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const currentAssistantId = useRef<string>('');
@@ -695,6 +701,8 @@ export default function ChatWindow() {
         hasMessages={messages.length > 0}
         autoVoice={autoVoice}
         onAutoVoiceConsumed={() => setAutoVoice(false)}
+        planMode={planMode}
+        onPlanModeChange={handlePlanModeChange}
       />
     </div>
   );

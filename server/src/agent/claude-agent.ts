@@ -113,6 +113,7 @@ export class ClaudeAgent {
   private favorites: FavoritesService;
   private personality: PersonalityEngine;
   private liveMode = false;
+  private planMode = false;
   private failedWithSonnet = false; // escalation flag
 
   constructor(
@@ -451,7 +452,12 @@ export class ClaudeAgent {
           }
 
           let result: string;
-          if (approved) {
+          if (this.isToolBlockedByPlanMode(block.name)) {
+            // In planning mode the agent only reads — no execution. The block
+            // is reported to the agent so it can incorporate "would have done X"
+            // into the plan instead of actually doing X.
+            result = `🧭 Planning mode: '${block.name}' was NOT executed. Add it to your plan and ask the user to approve the plan first (they can toggle planning mode off in the UI to execute).`;
+          } else if (approved) {
             const execResult = await executeTool(
               block.name,
               block.input as Record<string, unknown>,
@@ -612,6 +618,7 @@ export class ClaudeAgent {
         updateContext: contextMap['updates'] || '',
         sessionIntentsContext: contextMap['intents'] || '',
         liveMode: this.liveMode,
+        planMode: this.planMode,
       });
     }
 
@@ -624,6 +631,7 @@ export class ClaudeAgent {
       updateContext: updateAwareness.toContextString(),
       sessionIntentsContext: intentContext,
       liveMode: this.liveMode,
+      planMode: this.planMode,
     });
   }
 
@@ -655,6 +663,27 @@ export class ClaudeAgent {
 
   setLiveMode(live: boolean): void {
     this.liveMode = live;
+  }
+
+  setPlanMode(plan: boolean): void {
+    this.planMode = plan;
+  }
+
+  // Tools that mutate state. In planning mode the agent must NOT call these
+  // before the user approves the plan — only read/inspect tools are allowed.
+  private static MUTATING_TOOLS = new Set([
+    'write_file', 'edit_file', 'delete_file', 'run_command',
+    'send_sms', 'send_email', 'send_telegram', 'whatsapp_reply',
+    'make_call', 'gmail_send', 'gcal_add', 'gcal_delete',
+    'google_tasks_add', 'google_tasks_complete', 'google_tasks_delete',
+    'reminder_add', 'reminder_delete', 'routine_add', 'routine_delete',
+    'system_update', 'system_restart', 'plugin_install', 'plugin_uninstall',
+    'storage_delete_files', 'storage_clear_cache', 'storage_delete_empty_folders',
+    'backup_restore', 'memory_delete',
+  ]);
+
+  isToolBlockedByPlanMode(toolName: string): boolean {
+    return this.planMode && ClaudeAgent.MUTATING_TOOLS.has(toolName);
   }
 
   clearHistory(): void {

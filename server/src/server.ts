@@ -1902,6 +1902,10 @@ wss.on('connection', (ws: WebSocket, req) => {
         const live = msg.payload.enabled === true;
         agent.setLiveMode(live);
         console.log(`[${connectionId}] Live mode: ${live}`);
+      } else if (msg.type === 'set_plan_mode') {
+        const plan = msg.payload.enabled === true;
+        agent.setPlanMode(plan);
+        console.log(`[${connectionId}] Plan mode: ${plan}`);
       } else if (msg.type === 'clear_history') {
         agent.clearHistory();
         safeSend(ws, JSON.stringify({

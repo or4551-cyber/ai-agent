@@ -153,6 +153,7 @@ export function buildSystemPrompt(context: {
   updateContext?: string;
   sessionIntentsContext?: string;
   liveMode?: boolean;
+  planMode?: boolean;
 }): string {
   let prompt = BASE_PROMPT;
 
@@ -201,6 +202,11 @@ export function buildSystemPrompt(context: {
   // Live voice mode — keep responses ultra-short
   if (context.liveMode) {
     prompt += `\n## מצב קולי פעיל\n- אתה במצב שיחה קולית — **ענה בקצרה מאוד** (1-2 משפטים מקסימום)\n- אל תכתוב רשימות ארוכות, קוד, או markdown\n- אם צריך לבצע פעולה — תבצע מיד בלי לשאול אישור\n- דבר כמו בשיחת טלפון — טבעי, ישיר, קצר\n`;
+  }
+
+  // Planning mode — investigate, propose, NEVER execute mutations until approved
+  if (context.planMode) {
+    prompt += `\n## 🧭 מצב תכנון פעיל\n- אתה במצב **תכנון בלבד**. **אסור לך לבצע** פעולות שמשנות מצב — לא כתיבת קבצים, לא הרצת פקודות, לא שליחת הודעות, לא הוספת תזכורות, לא עדכון, כלום שמשנה את העולם.\n- מותר רק **לקרוא ולחקור**: read_file, list_directory, search_files, memory_search, system_status, web_search, gmail_list (read), וכלי קריאה נוספים.\n- בנה **תוכנית מסודרת** עם:\n  1. **מטרה** — מה המשתמש רוצה (בשפה שלו)\n  2. **שלבים** — צעד אחר צעד, מה תעשה בסדר ביצוע\n  3. **קבצים שייגעו** — נתיבים מדויקים\n  4. **סיכונים** — מה יכול להישבר\n  5. **חלופות** — אם יש דרך אחרת, הצג אותה בקצרה\n- בסוף: **שאל את המשתמש לאשר**. אומר "האם להמשיך לבצע?" או "להוציא את התוכנית הזו לפועל?".\n- אם נסית להריץ כלי שמשנה משהו — תראה הודעת שגיאה "🧭 Planning mode: NOT executed". זה לא באג, זה בכוונה. אמר למשתמש שצריך לאשר את התוכנית או לכבות מצב תכנון.\n- אחרי שמאשר — הוא יכבה את המצב או יאמר "תבצע" — ואז תפעל לפי התוכנית.\n`;
   }
 
   return prompt;
