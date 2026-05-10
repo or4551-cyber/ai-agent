@@ -153,6 +153,14 @@ export default function ChatWindow() {
       const status = event.payload.status as string;
       setConnected(status === 'connected');
       setConnectionStatus(status as any);
+      // When the WS drops mid-stream (e.g. server restart for self-update) we
+      // never receive message_done, so isStreaming stays true forever and the
+      // input freezes. Reset it on any disconnect — the next user message
+      // will set it to true again normally.
+      if (status === 'disconnected' || status === 'reconnecting') {
+        setIsStreaming(false);
+        setTypingStatus('idle');
+      }
     });
 
     ws.on('text_delta', (event: WSEvent) => {
@@ -295,6 +303,10 @@ export default function ChatWindow() {
         }
         return updated;
       });
+      // Server is going down — no further deltas are coming for the current
+      // turn. Release the input now so the user isn't stranded.
+      setIsStreaming(false);
+      setTypingStatus('idle');
     });
 
     ws.connect();
